@@ -7,6 +7,7 @@ import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
 import com.tibudget.dto.OperationDto;
 import org.jsoup.Connection;
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -146,6 +147,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			// Parse the returned document
 			page = response.parse();
 
+		} catch (HttpStatusException e) {
+			// Include HTTP error code in the exception message
+			throw new TemporaryUnavailable("HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
@@ -213,6 +217,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			// Parse the returned document
 			page = response.parse();
 
+		} catch (HttpStatusException e) {
+			// Include HTTP error code in the exception message
+			throw new TemporaryUnavailable("HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
@@ -250,6 +257,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			// Parse the returned document
 			page = response.parse();
 
+		} catch (HttpStatusException e) {
+			// Include HTTP error code in the exception message
+			throw new TemporaryUnavailable("HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
@@ -322,8 +332,10 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			}
 
 			downloadedFile = f;
-		}
-		catch (IOException e) {
+		} catch (HttpStatusException e) {
+			// Include HTTP error code in the log message
+			LOG.log(Level.SEVERE, "Ignoring IOException (on page download): HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
+		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ignoring IOException (on page download): " + e.getMessage(), e);
 		}
 		return downloadedFile;
