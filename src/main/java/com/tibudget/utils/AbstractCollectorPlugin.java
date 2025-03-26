@@ -131,15 +131,20 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public Document get(String url, boolean ajax) throws TemporaryUnavailable {
 		LOG.fine("GET " + url);
 		Document page;
+		Map<String, String> sentHeaders = Collections.emptyMap();
+		Map<String, String> sentCookies = Collections.emptyMap();
 		try {
 			// Avoid flooding the site
 			waitForNextRequest();
 
-			// Execute the GET request with current cookies
-			Connection.Response response = connect(url, ajax)
-					.cookies(this.cookies)
-					.method(Connection.Method.GET)
-					.execute();
+			Connection connection = connect(url, ajax)
+					.method(Connection.Method.GET);
+
+			// Keep cookies and headers actually sent in case of error
+			sentHeaders = new HashMap<>(connection.request().headers());
+			sentCookies = new HashMap<>(connection.request().cookies());
+
+			Connection.Response response = connection.execute();
 
 			// Update the cookies
 			this.cookies.putAll(response.cookies());
@@ -149,7 +154,15 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 		} catch (HttpStatusException e) {
 			// Include HTTP error code in the exception message
-			throw new TemporaryUnavailable("HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
+			StringBuilder msg = new StringBuilder();
+			msg.append("HTTP error ").append(e.getStatusCode()).append(": ").append(e.getMessage());
+			for (Map.Entry<String, String> entry : sentHeaders.entrySet()) {
+				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			}
+			for (Map.Entry<String, String> entry : sentCookies.entrySet()) {
+				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			}
+			throw new TemporaryUnavailable(msg.toString(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
@@ -178,6 +191,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 		Connection connection = Jsoup.connect(fullUrl)
 				.ignoreContentType(true)
+				.cookies(this.cookies)
 				.header("Pragma", "no-cache")
 				.header("Cache-Control", "no-cache");
 		for (Map.Entry<String, String> header : headers.entrySet()) {
@@ -200,16 +214,22 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public Document post(String url, Map<String, String> postdatas, boolean ajax) throws TemporaryUnavailable {
 		LOG.fine("POST " + url);
 		Document page;
+		Map<String, String> sentHeaders = Collections.emptyMap();
+		Map<String, String> sentCookies = Collections.emptyMap();
 		try {
 			// Avoid flooding the site
 			waitForNextRequest();
 
 			// Execute the POST request with current cookies
-			Connection.Response response = connect(url, ajax)
-					.cookies(this.cookies)
+			Connection connection = connect(url, ajax)
 					.method(Connection.Method.POST)
-					.data(postdatas)
-					.execute();
+					.data(postdatas);
+
+			// Keep cookies and headers actually sent in case of error
+			sentHeaders = new HashMap<>(connection.request().headers());
+			sentCookies = new HashMap<>(connection.request().cookies());
+
+			Connection.Response response = connection.execute();
 
 			// Update the cookies
 			this.cookies.putAll(response.cookies());
@@ -219,7 +239,15 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 		} catch (HttpStatusException e) {
 			// Include HTTP error code in the exception message
-			throw new TemporaryUnavailable("HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
+			StringBuilder msg = new StringBuilder();
+			msg.append("HTTP error ").append(e.getStatusCode()).append(": ").append(e.getMessage());
+			for (Map.Entry<String, String> entry : sentHeaders.entrySet()) {
+				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			}
+			for (Map.Entry<String, String> entry : sentCookies.entrySet()) {
+				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			}
+			throw new TemporaryUnavailable(msg.toString(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
@@ -240,16 +268,23 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public Document post(String url, String datas, boolean ajax) throws TemporaryUnavailable {
 		LOG.fine("POST " + url);
 		Document page;
+		Map<String, String> sentHeaders = Collections.emptyMap();
+		Map<String, String> sentCookies = Collections.emptyMap();
 		try {
 			// Avoid flooding the site
 			waitForNextRequest();
 
-			// Execute the POST request with current cookies
-			Connection.Response response = connect(url, ajax)
-					.cookies(this.cookies)
+			// Prepare the POST request
+			Connection connection = connect(url, ajax)
 					.method(Connection.Method.POST)
-					.requestBody(datas)
-					.execute();
+					.requestBody(datas);
+
+			// Keep cookies and headers actually sent in case of error
+			sentHeaders = new HashMap<>(connection.request().headers());
+			sentCookies = new HashMap<>(connection.request().cookies());
+
+			// Execute the POST request
+			Connection.Response response = connection.execute();
 
 			// Update the cookies
 			this.cookies.putAll(response.cookies());
@@ -259,7 +294,15 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 		} catch (HttpStatusException e) {
 			// Include HTTP error code in the exception message
-			throw new TemporaryUnavailable("HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
+			StringBuilder msg = new StringBuilder();
+			msg.append("HTTP error ").append(e.getStatusCode()).append(": ").append(e.getMessage());
+			for (Map.Entry<String, String> entry : sentHeaders.entrySet()) {
+				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			}
+			for (Map.Entry<String, String> entry : sentCookies.entrySet()) {
+				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			}
+			throw new TemporaryUnavailable(msg.toString(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
