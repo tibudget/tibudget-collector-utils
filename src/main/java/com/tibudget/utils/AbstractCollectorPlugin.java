@@ -1,11 +1,15 @@
 package com.tibudget.utils;
 
 import com.tibudget.api.CollectorPlugin;
-import com.tibudget.api.HumanSimulatorProvider;
 import com.tibudget.api.OTPProvider;
-import com.tibudget.api.exceptions.TemporaryUnavailable;
+import com.tibudget.api.OpenIdAuthenticator;
+import com.tibudget.api.exceptions.*;
 import com.tibudget.dto.AccountDto;
 import com.tibudget.dto.OperationDto;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.jsoup.Connection;
 import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
@@ -27,9 +31,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	private static final Logger LOG = Logger.getLogger(AbstractCollectorPlugin.class.getName());
 
+	private static final OkHttpClient client = new OkHttpClient();
+
 	public final Map<String, String> cookies;
 
-	public final Map<String, String> headers;
+	private final Map<String, String> headers;
 
 	public List<OperationDto> operations;
 
@@ -37,7 +43,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	public OTPProvider otpProvider;
 
-	public HumanSimulatorProvider humanSimulatorProvider;
+	public OpenIdAuthenticator openIdAuthenticator;
+
+	private String openIdAuthenticatorConfiguration = null;
 
 	/**
 	 * To be used as a referer
@@ -62,16 +70,35 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		super();
 		operations = new ArrayList<>();
 		accounts = new ArrayList<>();
+		headers = new HashMap<>();
 		cookies = new HashMap<>();
 
 		// Default Android HTTP headers
-		headers = new HashMap<>();
-		headers.put("Connection", "keep-alive");
-		headers.put("Upgrade-Insecure-Requests", "1");
-		headers.put("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36");
-		headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8");
-		headers.put("Accept-Encoding", "gzip, deflate, br");
-		headers.put("Accept-Language", Locale.getDefault().toLanguageTag() + "," + Locale.getDefault().getLanguage() + ";q=1");
+		addHeader("Connection", "keep-alive");
+		addHeader("Upgrade-Insecure-Requests", "1");
+		addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36");
+		addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8");
+		addHeader("Accept-Encoding", "gzip, deflate, br");
+		addHeader("Accept-Language", Locale.getDefault().toLanguageTag() + "," + Locale.getDefault().getLanguage() + ";q=1");
+	}
+
+	public AbstractCollectorPlugin(String openIdAuthenticatorConfiguration) {
+		this();
+		this.openIdAuthenticatorConfiguration = openIdAuthenticatorConfiguration;
+	}
+
+	public Map<String, String> getHeaders() {
+		return Collections.unmodifiableMap(headers);
+	}
+
+	public String getHeader(String header) {
+		return headers.get(header);
+	}
+
+	public void addHeader(String name, String value) {
+		if (name != null && value != null) {
+			headers.put(name.trim().toLowerCase(), value);
+		}
 	}
 
 	@Override
@@ -110,8 +137,16 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	@Override
-	public void setHumanSimulatorProvider(HumanSimulatorProvider humanSimulatorProvider) {
-		this.humanSimulatorProvider = humanSimulatorProvider;
+	public void setOpenIdAuthenticator(OpenIdAuthenticator openIdAuthenticator) {
+		this.openIdAuthenticator = openIdAuthenticator;
+	}
+
+	@Override
+	public void beforeCollect() throws AccessDeny, TemporaryUnavailable, ConnectionFailure, ParameterError {
+		if (openIdAuthenticator != null && openIdAuthenticatorConfiguration != null) {
+			openIdAuthenticator.setConfiguration(openIdAuthenticatorConfiguration);
+			openIdAuthenticator.authenticate();
+		}
 	}
 
 	@Override
@@ -129,51 +164,68 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	public Document get(String url, boolean ajax) throws TemporaryUnavailable {
-		LOG.fine("GET " + url);
-		Document page;
-		Map<String, String> sentHeaders = Collections.emptyMap();
-		Map<String, String> sentCookies = Collections.emptyMap();
+		String fullUrl;
+		if (url.startsWith("http")) {
+			fullUrl = url;
+		}
+		else {
+			fullUrl = getDomain() + url;
+		}
+		LOG.fine("GET " + fullUrl);
+		waitForNextRequest();
 		try {
-			// Avoid flooding the site
-			waitForNextRequest();
-
-			Connection connection = connect(url, ajax)
-					.method(Connection.Method.GET);
-
-			// Keep cookies and headers actually sent in case of error
-			sentHeaders = new HashMap<>(connection.request().headers());
-			sentCookies = new HashMap<>(connection.request().cookies());
-
-			Connection.Response response = connection.execute();
-
-			// Update the cookies
-			this.cookies.putAll(response.cookies());
-
-			// Parse the returned document
-			page = response.parse();
-
-		} catch (HttpStatusException e) {
-			// Include HTTP error code in the exception message
-			StringBuilder msg = new StringBuilder();
-			msg.append("HTTP error ").append(e.getStatusCode()).append(": ").append(e.getMessage());
-			for (Map.Entry<String, String> entry : sentHeaders.entrySet()) {
-				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			Request.Builder requestBuilder = new Request.Builder().url(fullUrl);
+			for (Map.Entry<String, String> header : headers.entrySet()) {
+				requestBuilder.addHeader(header.getKey(), header.getValue());
 			}
-			for (Map.Entry<String, String> entry : sentCookies.entrySet()) {
-				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
+			if (currentUrl != null) requestBuilder.addHeader("Referer", currentUrl);
+			if (ajax) requestBuilder.addHeader("X-Requested-With", "XMLHttpRequest");
+			if (!cookies.isEmpty()) {
+				String cookieHeader = cookies.entrySet().stream()
+						.map(e -> e.getKey() + "=" + e.getValue())
+						.reduce((a, b) -> a + "; " + b).orElse("");
+				requestBuilder.addHeader("Cookie", cookieHeader);
 			}
-			throw new TemporaryUnavailable(msg.toString(), e);
+			Request request = requestBuilder.build();
+			Response response = client.newCall(request).execute();
+
+			if (!response.isSuccessful()) {
+				StringBuilder msg = new StringBuilder();
+				msg.append("HTTP/").append(response.protocol()).append(" ").append(request.method()).append(" ").append(fullUrl).append(" => Error ").append(response.code()).append(": ").append(response.message());
+				for (Map.Entry<String, String> header : headers.entrySet()) {
+					msg.append("\n").append(header.getKey()).append(": ").append(header.getValue());
+				}
+				for (Map.Entry<String, String> cookie : cookies.entrySet()) {
+					msg.append("\n").append(cookie.getKey()).append(": ").append(cookie.getValue());
+				}
+				throw new TemporaryUnavailable(msg.toString());
+			}
+
+			updateCookies(response.headers("Set-Cookie"));
+			ResponseBody responseBody = Objects.requireNonNull(response.body());
+			String encoding = response.header("Content-Encoding", "");
+			String body;
+			if ("gzip".equalsIgnoreCase(encoding)) {
+				body = Jsoup.parse(new java.util.zip.GZIPInputStream(responseBody.byteStream()), null, url).html();
+			} else {
+				body = responseBody.string();
+			}
+			Document doc = Jsoup.parse(body, url);
+			if (!ajax) setNewLocation(doc.location());
+			LOG.fine("  |-> GET (" + response.protocol() + ") " + doc.location());
+			return doc;
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
+	}
 
-		if (!ajax) {
-			// Define the new location (from 'page' because it can be redirected)
-			setNewLocation(page.location());
+	private void updateCookies(List<String> setCookies) {
+		for (String header : setCookies) {
+			String[] parts = header.split(";")[0].split("=", 2);
+			if (parts.length == 2) {
+				cookies.put(parts[0].trim(), parts[1].trim());
+			}
 		}
-
-		LOG.fine("  |-> GET " + page.location());
-		return page;
 	}
 
 	public void setNewLocation(String url) {
@@ -183,7 +235,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	public Connection connect(String relativeUrl, boolean ajax) {
 		String fullUrl;
-		if (relativeUrl.startsWith(getDomain())) {
+		if (relativeUrl.startsWith("http")) {
 			fullUrl = relativeUrl;
 		}
 		else {
@@ -262,10 +314,10 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	public Document post(String url, String datas) throws TemporaryUnavailable {
-		return post(url, datas, false);
+		return post(url, datas, false, false);
 	}
 
-	public Document post(String url, String datas, boolean ajax) throws TemporaryUnavailable {
+	public Document post(String url, String datas, boolean ajax, boolean isJson) throws TemporaryUnavailable {
 		LOG.fine("POST " + url);
 		Document page;
 		Map<String, String> sentHeaders = Collections.emptyMap();
@@ -278,6 +330,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			Connection connection = connect(url, ajax)
 					.method(Connection.Method.POST)
 					.requestBody(datas);
+			if (isJson) {
+				connection.header("accept", "*/*");
+				connection.header("content-type", "application/json");
+				connection.header("content-length", String.valueOf(datas.length()));
+			}
 
 			// Keep cookies and headers actually sent in case of error
 			sentHeaders = new HashMap<>(connection.request().headers());
