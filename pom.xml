@@ -19,7 +19,7 @@
 		<maven.compiler.release>11</maven.compiler.release>
 
 		<!-- ti'bu API version -->
-		<tibudget.api.version>0.15</tibudget.api.version>
+		<tibudget.api.version>0.16</tibudget.api.version>
 	</properties>
 
 	<scm>

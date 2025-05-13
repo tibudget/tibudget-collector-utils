@@ -144,8 +144,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	@Override
 	public void beforeCollect() throws AccessDeny, TemporaryUnavailable, ConnectionFailure, ParameterError {
 		if (openIdAuthenticator != null && openIdAuthenticatorConfiguration != null) {
-			openIdAuthenticator.setConfiguration(openIdAuthenticatorConfiguration);
-			openIdAuthenticator.authenticate();
+			String accessToken = openIdAuthenticator.authenticate(openIdAuthenticatorConfiguration);
+			addHeader("Authorization", "Bearer " + accessToken);
 		}
 	}
 
