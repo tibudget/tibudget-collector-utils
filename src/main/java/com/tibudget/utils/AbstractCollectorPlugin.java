@@ -1,17 +1,11 @@
 package com.tibudget.utils;
 
 import com.tibudget.api.CollectorPlugin;
+import com.tibudget.api.InternetProvider;
 import com.tibudget.api.OTPProvider;
-import com.tibudget.api.OpenIdAuthenticator;
-import com.tibudget.api.exceptions.*;
+import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
 import com.tibudget.dto.OperationDto;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
-import org.jsoup.Connection;
-import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -19,10 +13,10 @@ import org.jsoup.select.Elements;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
 import java.net.URL;
-import java.net.URLConnection;
-import java.nio.file.Files;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -31,7 +25,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	private static final Logger LOG = Logger.getLogger(AbstractCollectorPlugin.class.getName());
 
-	private static final OkHttpClient client = new OkHttpClient();
+	public InternetProvider internetProvider;
+
+	public OTPProvider otpProvider;
 
 	public final Map<String, String> cookies;
 
@@ -40,12 +36,6 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public List<OperationDto> operations;
 
 	public List<AccountDto> accounts;
-
-	public OTPProvider otpProvider;
-
-	public OpenIdAuthenticator openIdAuthenticator;
-
-	private String openIdAuthenticatorConfiguration = null;
 
 	/**
 	 * To be used as a referer
@@ -82,9 +72,12 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		addHeader("Accept-Language", Locale.getDefault().toLanguageTag() + "," + Locale.getDefault().getLanguage() + ";q=1");
 	}
 
-	public AbstractCollectorPlugin(String openIdAuthenticatorConfiguration) {
-		this();
-		this.openIdAuthenticatorConfiguration = openIdAuthenticatorConfiguration;
+	@Override
+	public void init(InternetProvider internetProvider, OTPProvider otpProvider, Map<String, String> previousCookies, List<AccountDto> previousAccounts) {
+		this.internetProvider = internetProvider;
+		this.otpProvider = otpProvider;
+		this.cookies.putAll(previousCookies);
+		this.accounts.addAll(previousAccounts);
 	}
 
 	public Map<String, String> getHeaders() {
@@ -99,6 +92,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		if (name != null && value != null) {
 			headers.put(name.trim().toLowerCase(), value);
 		}
+	}
+
+	@Override
+	public Map<String, String> getCookies() {
+		return cookies;
 	}
 
 	@Override
@@ -121,39 +119,6 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		LOG.info("Progress: " + progress + "%");
 	}
 
-	@Override
-	public Map<String, String> getCookies() {
-		return cookies;
-	}
-
-	@Override
-	public void setCookies(Map<String, String> map) {
-		cookies.putAll(map);
-	}
-
-	@Override
-	public void setOTPProvider(OTPProvider otpProvider) {
-		this.otpProvider = otpProvider;
-	}
-
-	@Override
-	public void setOpenIdAuthenticator(OpenIdAuthenticator openIdAuthenticator) {
-		this.openIdAuthenticator = openIdAuthenticator;
-	}
-
-	@Override
-	public void beforeCollect() throws AccessDeny, TemporaryUnavailable, ConnectionFailure, ParameterError {
-		if (openIdAuthenticator != null && openIdAuthenticatorConfiguration != null) {
-			String accessToken = openIdAuthenticator.authenticate(openIdAuthenticatorConfiguration);
-			addHeader("Authorization", "Bearer " + accessToken);
-		}
-	}
-
-	@Override
-	public void setAccounts(List<AccountDto> list) {
-		this.accounts.addAll(list);
-	}
-
 	/**
 	 * @return getDomain() name of server, like "https://www.mybank.com"
 	 */
@@ -174,24 +139,24 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		LOG.fine("GET " + fullUrl);
 		waitForNextRequest();
 		try {
-			Request.Builder requestBuilder = new Request.Builder().url(fullUrl);
-			for (Map.Entry<String, String> header : headers.entrySet()) {
-				requestBuilder.addHeader(header.getKey(), header.getValue());
-			}
-			if (currentUrl != null) requestBuilder.addHeader("Referer", currentUrl);
-			if (ajax) requestBuilder.addHeader("X-Requested-With", "XMLHttpRequest");
-			if (!cookies.isEmpty()) {
-				String cookieHeader = cookies.entrySet().stream()
-						.map(e -> e.getKey() + "=" + e.getValue())
-						.reduce((a, b) -> a + "; " + b).orElse("");
-				requestBuilder.addHeader("Cookie", cookieHeader);
-			}
-			Request request = requestBuilder.build();
-			Response response = client.newCall(request).execute();
 
-			if (!response.isSuccessful()) {
+			if (currentUrl != null) {
+				headers.put("Referer", currentUrl);
+			}
+			else {
+				headers.remove("Referer");
+			}
+			if (ajax) {
+				headers.put("X-Requested-With", "XMLHttpRequest");
+			}
+			else {
+				headers.remove("X-Requested-With");
+			}
+			InternetProvider.Response response = internetProvider.get(fullUrl, headers, cookies);
+
+			if (response.code != 200) {
 				StringBuilder msg = new StringBuilder();
-				msg.append("HTTP/").append(response.protocol()).append(" ").append(request.method()).append(" ").append(fullUrl).append(" => Error ").append(response.code()).append(": ").append(response.message());
+				msg.append("HTTP/").append(response.protocol).append(" GET ").append(fullUrl).append(" => Error ").append(response.code).append(": ").append(response.message);
 				for (Map.Entry<String, String> header : headers.entrySet()) {
 					msg.append("\n").append(header.getKey()).append(": ").append(header.getValue());
 				}
@@ -201,18 +166,12 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 				throw new TemporaryUnavailable(msg.toString());
 			}
 
-			updateCookies(response.headers("Set-Cookie"));
-			ResponseBody responseBody = Objects.requireNonNull(response.body());
-			String encoding = response.header("Content-Encoding", "");
-			String body;
-			if ("gzip".equalsIgnoreCase(encoding)) {
-				body = Jsoup.parse(new java.util.zip.GZIPInputStream(responseBody.byteStream()), null, url).html();
-			} else {
-				body = responseBody.string();
-			}
-			Document doc = Jsoup.parse(body, url);
+			cookies.clear();
+			cookies.putAll(response.cookies);
+
+			Document doc = Jsoup.parse(response.body, response.location);
 			if (!ajax) setNewLocation(doc.location());
-			LOG.fine("  |-> GET (" + response.protocol() + ") " + doc.location());
+			LOG.fine("  |-> GET (" + response.protocol + ") " + response.location);
 			return doc;
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
@@ -233,73 +192,36 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		currentUrl = url;
 	}
 
-	public Connection connect(String relativeUrl, boolean ajax) {
-		String fullUrl;
-		if (relativeUrl.startsWith("http")) {
-			fullUrl = relativeUrl;
-		}
-		else {
-			fullUrl = getDomain() + relativeUrl;
-		}
-		Connection connection = Jsoup.connect(fullUrl)
-				.ignoreContentType(true)
-				.cookies(this.cookies)
-				.header("Pragma", "no-cache")
-				.header("Cache-Control", "no-cache");
-		for (Map.Entry<String, String> header : headers.entrySet()) {
-			connection.header(header.getKey(), header.getValue());
-		}
-		if (currentUrl != null && !currentUrl.isEmpty()) {
-			// Simulate the referer
-			connection.header("Referer", currentUrl);
-		}
-		if (ajax) {
-			connection.header("X-Requested-With", "XMLHttpRequest");
-		}
-		return connection;
-	}
-
 	public Document post(String relativeUrl, Map<String, String> postdata) throws TemporaryUnavailable {
 		return post(relativeUrl, postdata, false);
+	}
+
+	public static String buildFormEncodedPayload(Map<String, String> data) throws UnsupportedEncodingException {
+		StringBuilder result = new StringBuilder();
+		for (Map.Entry<String, String> entry : data.entrySet()) {
+			if (result.length() > 0) {
+				result.append("&");
+			}
+			result.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8));
+			result.append("=");
+			result.append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+		}
+		return result.toString();
 	}
 
 	public Document post(String url, Map<String, String> postdatas, boolean ajax) throws TemporaryUnavailable {
 		LOG.fine("POST " + url);
 		Document page;
-		Map<String, String> sentHeaders = Collections.emptyMap();
-		Map<String, String> sentCookies = Collections.emptyMap();
 		try {
 			// Avoid flooding the site
 			waitForNextRequest();
 
 			// Execute the POST request with current cookies
-			Connection connection = connect(url, ajax)
-					.method(Connection.Method.POST)
-					.data(postdatas);
-
-			// Keep cookies and headers actually sent in case of error
-			sentHeaders = new HashMap<>(connection.request().headers());
-			sentCookies = new HashMap<>(connection.request().cookies());
-
-			Connection.Response response = connection.execute();
-
-			// Update the cookies
-			this.cookies.putAll(response.cookies());
+			InternetProvider.Response response = internetProvider.post(url, buildFormEncodedPayload(postdatas), headers, cookies);
 
 			// Parse the returned document
-			page = response.parse();
+			page = Jsoup.parse(response.body, response.location);
 
-		} catch (HttpStatusException e) {
-			// Include HTTP error code in the exception message
-			StringBuilder msg = new StringBuilder();
-			msg.append("HTTP error ").append(e.getStatusCode()).append(": ").append(e.getMessage());
-			for (Map.Entry<String, String> entry : sentHeaders.entrySet()) {
-				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
-			}
-			for (Map.Entry<String, String> entry : sentCookies.entrySet()) {
-				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
-			}
-			throw new TemporaryUnavailable(msg.toString(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
@@ -320,46 +242,39 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public Document post(String url, String datas, boolean ajax, boolean isJson) throws TemporaryUnavailable {
 		LOG.fine("POST " + url);
 		Document page;
-		Map<String, String> sentHeaders = Collections.emptyMap();
-		Map<String, String> sentCookies = Collections.emptyMap();
 		try {
 			// Avoid flooding the site
 			waitForNextRequest();
 
 			// Prepare the POST request
-			Connection connection = connect(url, ajax)
-					.method(Connection.Method.POST)
-					.requestBody(datas);
 			if (isJson) {
-				connection.header("accept", "*/*");
-				connection.header("content-type", "application/json");
-				connection.header("content-length", String.valueOf(datas.length()));
+				headers.put("accept", "*/*");
+				headers.put("content-type", "application/json");
+				headers.put("content-length", String.valueOf(datas.length()));
 			}
-
-			// Keep cookies and headers actually sent in case of error
-			sentHeaders = new HashMap<>(connection.request().headers());
-			sentCookies = new HashMap<>(connection.request().cookies());
+			if (currentUrl != null) {
+				headers.put("Referer", currentUrl);
+			}
+			else {
+				headers.remove("Referer");
+			}
+			if (ajax) {
+				headers.put("X-Requested-With", "XMLHttpRequest");
+			}
+			else {
+				headers.remove("X-Requested-With");
+			}
 
 			// Execute the POST request
-			Connection.Response response = connection.execute();
+			InternetProvider.Response response = internetProvider.post(url, datas, headers, cookies);
 
 			// Update the cookies
-			this.cookies.putAll(response.cookies());
+			this.cookies.clear();
+			this.cookies.putAll(response.cookies);
 
 			// Parse the returned document
-			page = response.parse();
+			page = Jsoup.parse(response.body, response.location);
 
-		} catch (HttpStatusException e) {
-			// Include HTTP error code in the exception message
-			StringBuilder msg = new StringBuilder();
-			msg.append("HTTP error ").append(e.getStatusCode()).append(": ").append(e.getMessage());
-			for (Map.Entry<String, String> entry : sentHeaders.entrySet()) {
-				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
-			}
-			for (Map.Entry<String, String> entry : sentCookies.entrySet()) {
-				msg.append("\n").append(entry.getKey()).append(": ").append(entry.getValue());
-			}
-			throw new TemporaryUnavailable(msg.toString(), e);
 		} catch (IOException e) {
 			throw new TemporaryUnavailable("error.tmpunavailable", e);
 		}
@@ -405,36 +320,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		LOG.fine("GET " + url.toString());
 		File downloadedFile = null;
 		try {
-			File f = File.createTempFile("tibu-", ".bin");
-
-			URLConnection urlConn = url.openConnection();
-
-			if (url.toString().startsWith(getDomain())) {
-				// Only send cookies if it belongs to the same domain
-				StringBuilder cookieStr = new StringBuilder();
-				for (Map.Entry<String, String> cookie : this.cookies.entrySet()) {
-					cookieStr.append(cookie.getKey());
-					cookieStr.append("=");
-					cookieStr.append(cookie.getValue());
-					cookieStr.append("; ");
-				}
-				urlConn.setRequestProperty("Cookie", cookieStr.toString());
-			}
-
-			urlConn.connect();
-
-			try (OutputStream out = Files.newOutputStream(f.toPath())) {
-				byte[] buf = new byte[1024];
-				int len;
-				while ((len = urlConn.getInputStream().read(buf)) > 0) {
-					out.write(buf, 0, len);
-				}
-			}
-
-			downloadedFile = f;
-		} catch (HttpStatusException e) {
-			// Include HTTP error code in the log message
-			LOG.log(Level.SEVERE, "Ignoring IOException (on page download): HTTP error " + e.getStatusCode() + ": " + e.getMessage(), e);
+			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, cookies);
+			downloadedFile = new File(response.body);
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ignoring IOException (on page download): " + e.getMessage(), e);
 		}
