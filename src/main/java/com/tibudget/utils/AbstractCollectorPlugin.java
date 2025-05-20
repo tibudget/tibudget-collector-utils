@@ -14,6 +14,7 @@ import org.jsoup.select.Elements;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -76,8 +77,12 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public void init(InternetProvider internetProvider, OTPProvider otpProvider, Map<String, String> previousCookies, List<AccountDto> previousAccounts) {
 		this.internetProvider = internetProvider;
 		this.otpProvider = otpProvider;
-		this.cookies.putAll(previousCookies);
-		this.accounts.addAll(previousAccounts);
+		if (previousCookies != null) {
+			this.cookies.putAll(previousCookies);
+		}
+		if (previousAccounts != null) {
+			this.accounts.addAll(previousAccounts);
+		}
 	}
 
 	public Map<String, String> getHeaders() {
@@ -315,6 +320,20 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 		return post(formUrl, formData, false);
 	}
+
+	public File download(String urlStr) {
+        try {
+			if (urlStr == null) {
+				LOG.log(Level.SEVERE, "Cannot download from NULL URL");
+				return null;
+			}
+            URL url = new URL(urlStr);
+			return download(url);
+        } catch (MalformedURLException e) {
+			LOG.log(Level.SEVERE, "Cannot download from URL: " + urlStr, e);
+            return null;
+        }
+    }
 
 	public File download(URL url) {
 		LOG.fine("GET " + url.toString());
