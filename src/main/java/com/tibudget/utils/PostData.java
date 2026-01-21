@@ -1,17 +1,25 @@
 package com.tibudget.utils;
 
+import com.google.gson.Gson;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Fluent builder for application/x-www-form-urlencoded POST data.
- * Handles UTF-8 encoding and multiple types (String, int, boolean, etc.).
+ * Fluent builder for application/x-www-form-urlencoded or JSON POST data.
+ * Allows flexible format definition and string encoding at build time.
  */
 public class PostData {
 
+    public enum Format {
+        URLENCODED,
+        JSON
+    }
+
     private final Map<String, String> data = new LinkedHashMap<>();
+    private Format format = Format.URLENCODED; // default format
 
     public PostData() {
     }
@@ -22,19 +30,11 @@ public class PostData {
         }
     }
 
-    /**
-     * Ignore null key
-     * If value is null then the key is removed.
-     * @param key
-     * @param value
-     * @return this
-     */
     public PostData with(String key, String value) {
         if (key != null) {
             if (value != null) {
                 data.put(key, value);
-            }
-            else {
+            } else {
                 data.remove(key);
             }
         }
@@ -86,20 +86,60 @@ public class PostData {
         return Map.copyOf(data);
     }
 
-    /**
-     * Returns the POST data as a UTF-8 encoded form string: key1=value1&key2=value2
-     */
-    public String toFormEncoded() {
+    public PostData asUrlEncodedFormat() {
+        this.format = Format.URLENCODED;
+        return this;
+    }
+
+    public PostData asJSON() {
+        this.format = Format.JSON;
+        return this;
+    }
+
+    public String getContentType() {
+        if (format == Format.JSON) {
+            return "application/json";
+        }
+        else if (format == Format.URLENCODED) {
+            return "application/x-www-form-urlencoded";
+        }
+        return "text/plain";
+    }
+
+    public String build() {
+        switch (format) {
+            case JSON :
+                return encodeAsJSON();
+            case URLENCODED :
+            default:
+                return encodeAsURLEncoded();
+        }
+    }
+
+    private String encodeAsURLEncoded() {
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<String, String> entry : data.entrySet()) {
-            if (entry.getValue() == null) continue; // ignore null values
+            if (entry.getValue() == null) continue;
             if (sb.length() > 0) sb.append("&");
             sb.append(encode(entry.getKey())).append("=").append(encode(entry.getValue()));
         }
         return sb.toString();
     }
 
+    private String encodeAsJSON() {
+        Gson gson = new Gson();
+        return gson.toJson(data);
+    }
+
     private String encode(String s) {
         return URLEncoder.encode(s, StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public String toString() {
+        return "PostData{" +
+                "data=" + data +
+                ", format=" + format +
+                "'} body=" + build();
     }
 }

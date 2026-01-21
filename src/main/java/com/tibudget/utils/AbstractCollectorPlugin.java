@@ -1,11 +1,15 @@
 package com.tibudget.utils;
 
-import com.tibudget.api.CollectorPlugin;
-import com.tibudget.api.InternetProvider;
-import com.tibudget.api.OTPProvider;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
+import com.tibudget.api.*;
+import com.tibudget.api.exceptions.AccessDeny;
+import com.tibudget.api.exceptions.CollectError;
+import com.tibudget.api.exceptions.ConnectionFailure;
 import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
-import com.tibudget.dto.OperationDto;
+import com.tibudget.dto.TransactionDto;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -18,6 +22,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,17 +31,28 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	private static final Logger LOG = Logger.getLogger(AbstractCollectorPlugin.class.getName());
 
+	private Gson gson;
+
 	public InternetProvider internetProvider;
 
+	public CounterpartyProvider counterpartyProvider;
+
 	public OTPProvider otpProvider;
+
+	public PDFToolsProvider pdfToolsProvider;
+
+	public final Map<String, String> settings;
 
 	public final Map<String, String> cookies;
 
 	private final Map<String, String> headers;
 
-	public List<OperationDto> operations;
+	public List<TransactionDto> transactions;
 
-	public List<AccountDto> accounts;
+	/**
+	 * The key will be a stable identifier known by the collector (iban or loyalty card number for exemple)
+	 */
+	public Map<String, AccountDto> accounts;
 
 	/**
 	 * To be used as a referer
@@ -59,10 +75,14 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	public AbstractCollectorPlugin() {
 		super();
-		operations = new ArrayList<>();
-		accounts = new ArrayList<>();
+		transactions = new ArrayList<>();
+		accounts = new HashMap<>();
 		headers = new HashMap<>();
+		settings = new HashMap<>();
 		cookies = new HashMap<>();
+		gson = new GsonBuilder()
+				.registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter())
+				.create();
 
 		// Default Android HTTP headers
 		addHeader("Connection", "keep-alive");
@@ -74,14 +94,26 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	@Override
-	public void init(InternetProvider internetProvider, OTPProvider otpProvider, Map<String, String> previousCookies, List<AccountDto> previousAccounts) {
+	public void init(InternetProvider internetProvider, CounterpartyProvider counterpartyProvider, OTPProvider otpProvider, PDFToolsProvider pdfToolsProvider, Map<String, String> settings,
+					 Map<String, String> previousCookies, List<AccountDto> previousAccounts) {
 		this.internetProvider = internetProvider;
+		this.counterpartyProvider = counterpartyProvider;
 		this.otpProvider = otpProvider;
+		this.pdfToolsProvider = pdfToolsProvider;
+		if (settings != null) {
+			this.settings.putAll(settings);
+		}
 		if (previousCookies != null) {
 			this.cookies.putAll(previousCookies);
 		}
 		if (previousAccounts != null) {
-			this.accounts.addAll(previousAccounts);
+			for (AccountDto account : previousAccounts) {
+				String ref = account.getMetadata(AccountDto.METADATA_REFERENCE);
+				if (ref == null) {
+					throw new IllegalArgumentException("AccountDto must have a reference in metadata: " + account);
+				}
+				this.accounts.put(account.getMetadata(AccountDto.METADATA_REFERENCE), account);
+			}
 		}
 	}
 
@@ -106,12 +138,12 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	@Override
 	public List<AccountDto> getAccounts() {
-		return accounts;
+		return new ArrayList<>(accounts.values());
 	}
 
 	@Override
-	public List<OperationDto> getOperations() {
-		return operations;
+	public List<TransactionDto> getTransactions() {
+		return transactions;
 	}
 
 	@Override
@@ -134,6 +166,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	public Document get(String url, boolean ajax) throws TemporaryUnavailable {
+		if (internetProvider == null) {
+			throw new IllegalStateException("InternetProvider not provided");
+		}
 		String fullUrl;
 		if (url.startsWith("http")) {
 			fullUrl = url;
@@ -215,6 +250,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	public Document post(String url, Map<String, String> postdatas, boolean ajax) throws TemporaryUnavailable {
+		if (internetProvider == null) {
+			throw new IllegalStateException("InternetProvider not provided");
+		}
 		LOG.fine("POST " + url);
 		Document page;
 		try {
@@ -222,7 +260,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			waitForNextRequest();
 
 			// Execute the POST request with current cookies
-			InternetProvider.Response response = internetProvider.post(url, buildFormEncodedPayload(postdatas), headers, cookies);
+			InternetProvider.Response response = internetProvider.post(url, buildFormEncodedPayload(postdatas), "application/x-www-form-urlencoded", headers, cookies);
 
 			// Parse the returned document
 			page = Jsoup.parse(response.body, response.location);
@@ -245,6 +283,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	public Document post(String url, String datas, boolean ajax, boolean isJson) throws TemporaryUnavailable {
+		if (internetProvider == null) {
+			throw new IllegalStateException("InternetProvider not provided");
+		}
 		LOG.fine("POST " + url);
 		Document page;
 		try {
@@ -271,7 +312,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			}
 
 			// Execute the POST request
-			InternetProvider.Response response = internetProvider.post(url, datas, headers, cookies);
+			InternetProvider.Response response = internetProvider.post(url, datas, "application/json", headers, cookies);
 
 			// Update the cookies
 			this.cookies.clear();
@@ -321,30 +362,119 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return post(formUrl, formData, false);
 	}
 
-	public File download(String urlStr) {
+	public File download(String urlStr, String contentType) {
         try {
 			if (urlStr == null) {
 				LOG.log(Level.SEVERE, "Cannot download from NULL URL");
 				return null;
 			}
             URL url = new URL(urlStr);
-			return download(url);
+			return download(url, contentType);
         } catch (MalformedURLException e) {
 			LOG.log(Level.SEVERE, "Cannot download from URL: " + urlStr, e);
             return null;
         }
     }
 
-	public File download(URL url) {
+	public File download(URL url, String contentType) {
+		if (internetProvider == null) {
+			throw new IllegalStateException("InternetProvider not provided");
+		}
 		LOG.fine("GET " + url.toString());
 		File downloadedFile = null;
 		try {
-			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, cookies);
+			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, cookies, contentType);
 			downloadedFile = new File(response.body);
 		} catch (IOException e) {
 			LOG.log(Level.SEVERE, "Ignoring IOException (on page download): " + e.getMessage(), e);
 		}
 		return downloadedFile;
+	}
+
+	public <T> T get(String url, Class<T> clazz)
+			throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure {
+		if (internetProvider == null) {
+			throw new IllegalStateException("InternetProvider not provided");
+		}
+
+		InternetProvider.Response response;
+		try {
+			// Make sure the Accept header is JSON
+			addHeader("Accept", "application/json");
+			response = internetProvider.get(
+					url,
+					getHeaders(),
+					getCookies()
+			);
+		} catch (IOException e) {
+			throw new TemporaryUnavailable(e.getMessage());
+		}
+
+		return handleJsonResponse(clazz, response);
+	}
+
+	public <T> T post(String url, Class<T> clazz, PostData postData)
+			throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure {
+		if (internetProvider == null) {
+			throw new IllegalStateException("InternetProvider not provided");
+		}
+
+		Map<String, String> headers = new HashMap<>(getHeaders());
+		InternetProvider.Response response;
+		try {
+			// Make sure the Accept header is JSON
+			addHeader("Accept", "application/json");
+			response = internetProvider.post(
+					url,
+					postData.build(),
+					postData.getContentType(),
+					headers,
+					getCookies()
+			);
+		} catch (IOException e) {
+			throw new TemporaryUnavailable(e.getMessage());
+		}
+
+		T result;
+		try {
+			result = handleJsonResponse(clazz, response);
+		}
+		catch (Exception e) {
+			LOG.log(Level.SEVERE, e.getMessage() + " - POST " + url + " clazz=" + clazz + " headers=" + headers + " " + postData);
+			throw e;
+		}
+		return result;
+	}
+
+	private <T> T handleJsonResponse(Class<T> clazz, InternetProvider.Response response) throws AccessDeny, TemporaryUnavailable, ConnectionFailure, CollectError {
+		if (response.code == 403 || response.code == 401) {
+			throw new AccessDeny("Access denied (" + response.code + ")");
+		}
+
+		if (response.code >= 500 && response.code < 600) {
+			throw new TemporaryUnavailable("Server error: " + response.code + " - " + response.message);
+		}
+
+		if (response.code >= 400 && response.code < 500) {
+			throw new CollectError("Bad request (or something): " + response.code + " - " + response.message);
+		}
+
+		if (response.code < 200 || response.code >= 300) {
+			throw new ConnectionFailure("Unexpected HTTP status: " + response.code + " - " + response.message);
+		}
+
+		T object;
+		try {
+			object = gson.fromJson(response.body, clazz);
+			if (object == null) {
+				LOG.log(Level.SEVERE, "fromJson returned null object for class " + clazz + " with JSON: " + response.body);
+				throw new CollectError("Invalid or incomplete object");
+			}
+		} catch (JsonSyntaxException e) {
+			LOG.log(Level.SEVERE, "Invalid JSON format for class " + clazz + " with JSON: " + response.body, e);
+			throw new CollectError("Invalid JSON format", e);
+		}
+		return object;
 	}
 
 	public String getCurrentUrl() {

@@ -19,7 +19,7 @@
 		<maven.compiler.release>11</maven.compiler.release>
 
 		<!-- ti'bu API version -->
-		<tibudget.api.version>0.20</tibudget.api.version>
+		<tibudget.api.version>0.38</tibudget.api.version>
 	</properties>
 
 	<scm>
@@ -42,12 +42,6 @@
 
 	<dependencies>
 
-		<!-- Needed to use latest HTTP protocol -->
-		<dependency>
-			<groupId>com.squareup.okhttp3</groupId>
-			<artifactId>okhttp</artifactId>
-			<version>4.12.0</version>
-		</dependency>
 		<!-- Needed to parse HTML -->
 		<dependency>
 			<groupId>org.jsoup</groupId>

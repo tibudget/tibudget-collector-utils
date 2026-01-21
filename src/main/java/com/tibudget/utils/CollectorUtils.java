@@ -1,7 +1,12 @@
 package com.tibudget.utils;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.text.NumberFormat;
 import java.text.ParseException;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -159,4 +164,67 @@ public final class CollectorUtils {
             return null;
         }
     }
+
+    /**
+     * Copies a resource from the classpath to a temporary file.
+     *
+     * @param resourceName the name/path of the resource relative to the classpath
+     * @return a File object pointing to the newly created temporary file
+     * @throws IOException if the resource cannot be read or the file cannot be written
+     */
+    public static File copyResourceToTempFile(String resourceName) throws IOException {
+        // Attempt to load the resource as an InputStream from the classpath
+        try (InputStream inputStream = CollectorUtils.class.getClassLoader().getResourceAsStream(resourceName)) {
+            if (inputStream == null) {
+                throw new IOException("Resource not found on classpath: " + resourceName);
+            }
+
+            // Extract the file extension (e.g., ".png", ".jpg") from the resource name
+            String extension = "";
+            int lastDotIndex = resourceName.lastIndexOf('.');
+            if (lastDotIndex >= 0 && lastDotIndex < resourceName.length() - 1) {
+                extension = resourceName.substring(lastDotIndex);
+            }
+
+            // Create a temporary file with a prefix and extracted extension
+            File tempFile = File.createTempFile("tibu_", extension);
+            tempFile.deleteOnExit(); // Ensure the file is removed when the JVM exits
+
+            // Write the content of the resource to the temp file
+            try (FileOutputStream outputStream = new FileOutputStream(tempFile)) {
+                byte[] buffer = new byte[4096]; // Larger buffer for better performance
+                int bytesRead;
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+            }
+
+            return tempFile;
+        }
+    }
+
+    /**
+     * Converts a Date to a String using its epoch time (milliseconds since 1970-01-01 UTC).
+     *
+     * @param date the Date to serialize, may be null
+     * @return the epoch time as String, or null if date is null
+     */
+    public static String dateToString(Date date) {
+        return date == null ? null : String.valueOf(date.getTime());
+    }
+
+    /**
+     * Converts a String containing an epoch time (milliseconds since 1970-01-01 UTC)
+     * back to a Date.
+     *
+     * @param value the String to deserialize, may be null or empty
+     * @return the corresponding Date, or null if value is null or empty
+     * @throws NumberFormatException if the value is not a valid long
+     */
+    public static Date stringToDate(String value) {
+        return (value == null || value.isEmpty())
+                ? null
+                : new Date(Long.parseLong(value));
+    }
+
 }
