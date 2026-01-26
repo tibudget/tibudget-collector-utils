@@ -86,13 +86,21 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 				.registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter())
 				.create();
 
-		// Default Android HTTP headers
+		// Default HTTP headers
+		addHeader("User-Agent", getUserAgent());
+		addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+		addHeader("Accept-Encoding", "gzip, deflate, br, zstd");
+		addHeader("Accept-Language", Locale.getDefault().toLanguageTag() + "," + Locale.getDefault().getLanguage() + ";q=1");
+		addHeader("Sec-GPC", "1");
 		addHeader("Connection", "keep-alive");
 		addHeader("Upgrade-Insecure-Requests", "1");
-		addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36");
-		addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8");
-		addHeader("Accept-Encoding", "gzip, deflate, br");
-		addHeader("Accept-Language", Locale.getDefault().toLanguageTag() + "," + Locale.getDefault().getLanguage() + ";q=1");
+		addHeader("Sec-Fetch-Dest", "document");
+		addHeader("Sec-Fetch-Mode", "navigate");
+		addHeader("Sec-Fetch-Site", "none");
+		addHeader("Sec-Fetch-User", "?1");
+		addHeader("Priority", "u=0, i");
+		addHeader("Pragma", "no-cache");
+		addHeader("Cache-Control", "no-cache");
 	}
 
 	@Override
@@ -141,7 +149,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		String userAgent = System.getProperty("http.agent");
 		if (userAgent == null) {
 			// For testing purpose, on mobile app the property is normally set
-			userAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UP1A.231005.007)";
+			userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 		}
 		return userAgent;
 	}
@@ -156,7 +164,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	public void addHeader(String name, String value) {
 		if (name != null && value != null) {
-			headers.put(name.trim().toLowerCase(), value);
+			headers.put(name.trim(), value);
 		}
 	}
 
@@ -302,8 +310,16 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			// Avoid flooding the site
 			waitForNextRequest();
 
+			// Very important because it is checked by security systems on the server side
+			if (currentUrl != null) {
+				headers.put("Referer", currentUrl);
+			}
+			else {
+				headers.remove("Referer");
+			}
+
 			// Execute the POST request with current cookies
-			InternetProvider.Response response = internetProvider.post(fullUrl, buildFormEncodedPayload(postdatas), "application/x-www-form-urlencoded", headers, cookies);
+			InternetProvider.Response response = internetProvider.post(fullUrl, buildFormEncodedPayload(postdatas), "application/x-www-form-urlencoded; charset=" + StandardCharsets.UTF_8, headers, cookies);
 
 			// Parse the returned document
 			page = Jsoup.parse(response.body, response.location);
@@ -338,16 +354,19 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 			// Prepare the POST request
 			if (isJson) {
-				headers.put("accept", "*/*");
-				headers.put("content-type", "application/json");
-				headers.put("content-length", String.valueOf(datas.length()));
+				headers.put("Accept", "*/*");
+				headers.put("Content-type", "application/json");
+				headers.put("Content-length", String.valueOf(datas.length()));
 			}
+
+			// Very important because it is checked by security systems on the server side
 			if (currentUrl != null) {
 				headers.put("Referer", currentUrl);
 			}
 			else {
 				headers.remove("Referer");
 			}
+
 			if (ajax) {
 				headers.put("X-Requested-With", "XMLHttpRequest");
 			}
@@ -433,6 +452,17 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
+
+		// Very important because it is checked by security systems on the server side
+		if (currentUrl != null) {
+			headers.put("Referer", currentUrl);
+		}
+		else {
+			headers.remove("Referer");
+		}
+
+		headers.remove("X-Requested-With");
+
 		LOG.fine("GET " + url.toString());
 		File downloadedFile = null;
 		try {
