@@ -66,34 +66,43 @@ public final class CollectorUtils {
     }
 
     /**
-     * Converts an HTML-encoded string into a UTF-8 plain text string.
-     * Also trims unnecessary spaces at the beginning and end of the string.
-     * Optionally, replaces multiple whitespace characters (spaces, tabs) with a single space.
+     * Converts an HTML string into plain UTF-8 text.
+     * <p>
+     * This method:
+     * - removes all HTML tags
+     * - decodes basic HTML entities
+     * - optionally normalizes whitespace
      *
-     * @param htmlText The input string containing potential HTML entities.
-     * @param normalizeWhitespace If true, replaces multiple whitespace characters with a single space.
-     * @return A UTF-8 decoded and trimmed version of the input string.
+     * @param htmlText input HTML string
+     * @param normalizeWhitespace if true, collapses multiple whitespace characters into one space
+     * @return plain text representation
      */
     public static String htmlToText(String htmlText, boolean normalizeWhitespace) {
         if (htmlText == null || htmlText.isEmpty()) {
             return "";
         }
 
-        // Decode HTML entities
-        String decoded = htmlText;
+        // 1) Remove HTML tags
+        String text = htmlText.replaceAll("(?s)<[^>]*>", " ");
+
+        // 2) Decode HTML entities
         for (Map.Entry<String, String> entry : HTML_ENTITIES.entrySet()) {
-            decoded = decoded.replace(entry.getKey(), entry.getValue());
+            text = text.replace(entry.getKey(), entry.getValue());
         }
 
-        decoded = decoded.trim();
+        // 3) Normalize spaces created by tag removal
+        text = text
+                .replace('\u00A0', ' ')
+                .replace('\u202F', ' ')
+                .trim();
 
-        // Normalize whitespace if the option is enabled
         if (normalizeWhitespace) {
-            decoded = decoded.replaceAll("\\s+", " ");
+            text = text.replaceAll("\\s+", " ");
         }
 
-        return decoded;
+        return text;
     }
+
 
     /**
      * Truncates a given text to the specified maximum length.
@@ -134,35 +143,6 @@ public final class CollectorUtils {
         }
 
         return truncated + "...";
-    }
-
-    /**
-     * Parses a price from a given string, handling HTML entities, currency symbols, and locale-based formatting.
-     *
-     * @param priceText The input string containing a price.
-     * @param locale The locale to determine number format (e.g., Locale.FRANCE, Locale.US).
-     * @return A Double representing the parsed price, or null if parsing fails.
-     */
-    public static Double parsePrice(String priceText, Locale locale) {
-        if (priceText == null || priceText.isEmpty()) {
-            LOG.log(Level.FINE, "Cannot parse price from null or empty value");
-            return null;
-        }
-
-        // Decode HTML entities
-        String cleanText = htmlToText(priceText, true);
-
-        // Remove all non-numeric characters except digits, decimal separators, and grouping separators
-        cleanText = cleanText.replaceAll("[^0-9.,']", "");
-
-        // Parse using NumberFormat for the given locale
-        NumberFormat numberFormat = NumberFormat.getNumberInstance(locale);
-        try {
-            return numberFormat.parse(cleanText).doubleValue();
-        } catch (ParseException e) {
-            LOG.log(Level.SEVERE, "Cannot parse price from '"+priceText+"' : " + e.getMessage());
-            return null;
-        }
     }
 
     /**

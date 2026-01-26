@@ -2,9 +2,7 @@ package com.tibudget.utils;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.Locale;
-
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class CollectorUtilsTest {
 
@@ -33,32 +31,6 @@ class CollectorUtilsTest {
     void truncateString_shouldNotTruncateShortString() {
         String input = "Short text";
         assertEquals(input, CollectorUtils.truncateString(input, 50));
-    }
-
-    @Test
-    void parsePrice_shouldParseFrenchPrice() {
-        String input = "1&nbsp;234,56&nbsp;€";
-        Double expected = 1234.56;
-        assertEquals(expected, CollectorUtils.parsePrice(input, Locale.FRANCE));
-    }
-
-    @Test
-    void parsePrice_shouldParseUSPrice() {
-        String input = "$1,234.56";
-        Double expected = 1234.56;
-        assertEquals(expected, CollectorUtils.parsePrice(input, Locale.US));
-    }
-
-    @Test
-    void parsePrice_shouldReturnNullForInvalidInput() {
-        String input = "not a price";
-        assertNull(CollectorUtils.parsePrice(input, Locale.US));
-    }
-
-    @Test
-    void parsePrice_shouldHandleNullAndEmptyInput() {
-        assertNull(CollectorUtils.parsePrice(null, Locale.US));
-        assertNull(CollectorUtils.parsePrice("", Locale.US));
     }
 
     @Test

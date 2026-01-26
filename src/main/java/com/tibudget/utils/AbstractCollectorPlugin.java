@@ -9,6 +9,7 @@ import com.tibudget.api.exceptions.CollectError;
 import com.tibudget.api.exceptions.ConnectionFailure;
 import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
+import com.tibudget.dto.MessageDto;
 import com.tibudget.dto.TransactionDto;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -19,6 +20,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -117,6 +119,33 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
+	@Override
+	public String initConnection(URI uri) {
+		return "";
+	}
+
+	/**
+	 * Do nothing by default, override it if other validation are required
+	 * @return List of messages to display to the user if there is any validation problem
+	 */
+	@Override
+	public List<MessageDto> validate() {
+		return List.of();
+	}
+
+	/**
+	 * Returns the user agent of the mobile phone.
+	 * @return the user agent of the mobile phone.
+	 */
+	public String getUserAgent() {
+		String userAgent = System.getProperty("http.agent");
+		if (userAgent == null) {
+			// For testing purpose, on mobile app the property is normally set
+			userAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UP1A.231005.007)";
+		}
+		return userAgent;
+	}
+
 	public Map<String, String> getHeaders() {
 		return Collections.unmodifiableMap(headers);
 	}
@@ -147,6 +176,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	@Override
+	public Map<String, String> getSettings() {
+		return settings;
+	}
+
+	@Override
 	public int getProgress() {
 		return progress;
 	}
@@ -165,17 +199,25 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return get(url, false);
 	}
 
+	protected String getFullURL(String relativeUrl) {
+		if (relativeUrl == null) {
+			return null;
+		}
+		String fullUrl;
+		if (relativeUrl.startsWith("http")) {
+			fullUrl = relativeUrl;
+		}
+		else {
+			fullUrl = getDomain() + relativeUrl;
+		}
+		return fullUrl;
+	}
+
 	public Document get(String url, boolean ajax) throws TemporaryUnavailable {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
-		String fullUrl;
-		if (url.startsWith("http")) {
-			fullUrl = url;
-		}
-		else {
-			fullUrl = getDomain() + url;
-		}
+		String fullUrl = getFullURL(url);
 		LOG.fine("GET " + fullUrl);
 		waitForNextRequest();
 		try {
@@ -253,14 +295,15 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
-		LOG.fine("POST " + url);
+		String fullUrl = getFullURL(url);
+		LOG.fine("POST " + fullUrl);
 		Document page;
 		try {
 			// Avoid flooding the site
 			waitForNextRequest();
 
 			// Execute the POST request with current cookies
-			InternetProvider.Response response = internetProvider.post(url, buildFormEncodedPayload(postdatas), "application/x-www-form-urlencoded", headers, cookies);
+			InternetProvider.Response response = internetProvider.post(fullUrl, buildFormEncodedPayload(postdatas), "application/x-www-form-urlencoded", headers, cookies);
 
 			// Parse the returned document
 			page = Jsoup.parse(response.body, response.location);
@@ -286,7 +329,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
-		LOG.fine("POST " + url);
+		String fullUrl = getFullURL(url);
+		LOG.fine("POST " + fullUrl);
 		Document page;
 		try {
 			// Avoid flooding the site
@@ -312,7 +356,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			}
 
 			// Execute the POST request
-			InternetProvider.Response response = internetProvider.post(url, datas, "application/json", headers, cookies);
+			InternetProvider.Response response = internetProvider.post(fullUrl, datas, "application/json", headers, cookies);
 
 			// Update the cookies
 			this.cookies.clear();
@@ -362,19 +406,28 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return post(formUrl, formData, false);
 	}
 
+	public File downloadUnkownContentType(String urlStr) {
+		return download(urlStr, null);
+	}
+
 	public File download(String urlStr, String contentType) {
+		String fullUrl = getFullURL(urlStr);
         try {
-			if (urlStr == null) {
+			if (fullUrl == null) {
 				LOG.log(Level.SEVERE, "Cannot download from NULL URL");
 				return null;
 			}
-            URL url = new URL(urlStr);
+			URL url = new URL(fullUrl);
 			return download(url, contentType);
         } catch (MalformedURLException e) {
-			LOG.log(Level.SEVERE, "Cannot download from URL: " + urlStr, e);
+			LOG.log(Level.SEVERE, "Cannot download from URL: " + fullUrl, e);
             return null;
         }
     }
+
+	public File downloadUnkownContentType(URL url) {
+		return download(url, null);
+	}
 
 	public File download(URL url, String contentType) {
 		if (internetProvider == null) {
@@ -396,13 +449,13 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
-
+		String fullUrl = getFullURL(url);
 		InternetProvider.Response response;
 		try {
 			// Make sure the Accept header is JSON
 			addHeader("Accept", "application/json");
 			response = internetProvider.get(
-					url,
+					fullUrl,
 					getHeaders(),
 					getCookies()
 			);
@@ -418,6 +471,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
+		String fullUrl = getFullURL(url);
 
 		Map<String, String> headers = new HashMap<>(getHeaders());
 		InternetProvider.Response response;
@@ -425,7 +479,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			// Make sure the Accept header is JSON
 			addHeader("Accept", "application/json");
 			response = internetProvider.post(
-					url,
+					fullUrl,
 					postData.build(),
 					postData.getContentType(),
 					headers,
@@ -440,7 +494,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			result = handleJsonResponse(clazz, response);
 		}
 		catch (Exception e) {
-			LOG.log(Level.SEVERE, e.getMessage() + " - POST " + url + " clazz=" + clazz + " headers=" + headers + " " + postData);
+			LOG.log(Level.SEVERE, e.getMessage() + " - POST " + fullUrl + " clazz=" + clazz + " headers=" + headers + " " + postData);
 			throw e;
 		}
 		return result;
