@@ -31,7 +31,7 @@ import java.util.logging.Logger;
 /**
  * Base implementation for collector plugins.
  * <p>
- * This class provides common HTTP handling, cookie management,
+ * This class provides common HTTP handling,
  * throttling, HTML parsing and JSON deserialization utilities.
  */
 public abstract class AbstractCollectorPlugin implements CollectorPlugin {
@@ -44,7 +44,6 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	protected PDFToolsProvider pdfToolsProvider;
 
 	protected final Map<String, String> settings = new HashMap<>();
-	protected final Map<String, String> cookies = new HashMap<>();
 	protected final Map<String, String> headers = new HashMap<>();
 
 	protected final List<TransactionDto> transactions = new ArrayList<>();
@@ -105,7 +104,6 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			OTPProvider otpProvider,
 			PDFToolsProvider pdfToolsProvider,
 			Map<String, String> settings,
-			Map<String, String> previousCookies,
 			List<AccountDto> previousAccounts
 	) {
 		this.internetProvider = internetProvider;
@@ -115,10 +113,6 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 		if (settings != null) {
 			this.settings.putAll(settings);
-		}
-
-		if (previousCookies != null) {
-			this.cookies.putAll(previousCookies);
 		}
 
 		if (previousAccounts != null) {
@@ -187,10 +181,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		prepareHeaders(ajax, false);
 
 		try {
-			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers, cookies);
-
-			cookies.clear();
-			cookies.putAll(response.cookies);
+			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers);
 
 			if (response.code != 200) {
 				throw new TemporaryUnavailable("HTTP error " + response.code);
@@ -219,10 +210,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			InternetProvider.Response response =
 					internetProvider.post(getFullURL(url), payload,
 							"application/x-www-form-urlencoded; charset=UTF-8",
-							headers, cookies);
-
-			cookies.clear();
-			cookies.putAll(response.cookies);
+							headers);
 
 			Document doc = Jsoup.parse(response.body, response.location);
 			if (!ajax) setNewLocation(doc.location());
@@ -269,7 +257,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		prepareHeaders(false, true);
 
 		try {
-			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers, cookies);
+			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers);
 			return handleJsonResponse(clazz, response);
 		} catch (IOException e) {
 			logNetworkError("getJson", url, e);
@@ -284,7 +272,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		prepareHeaders(false, true);
 
 		try {
-			InternetProvider.Response response = internetProvider.post(getFullURL(url), json, "application/json", headers, cookies);
+			InternetProvider.Response response = internetProvider.post(getFullURL(url), json, "application/json", headers);
 			return handleJsonResponse(clazz, response);
 		} catch (IOException e) {
 			logNetworkError("postJson", url, e);
@@ -340,7 +328,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		getLogger().fine("GET " + url);
 
 		try {
-			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, cookies, contentType);
+			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, contentType);
+
 			return new File(response.body);
 		} catch (IOException e) {
 			logNetworkError("postForm", url.toString(), e);
@@ -431,11 +420,6 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	@Override
-	public Map<String, String> getCookies() {
-		return cookies;
-	}
-
-	@Override
 	public Map<String, String> getSettings() {
 		return settings;
 	}
@@ -484,7 +468,6 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		log.put("url", sanitizeUrl(url));
 		log.put("currentUrl", sanitizeUrl(currentUrl));
 		log.put("lastUrl", sanitizeUrl(lastUrl));
-		log.put("hasCookies", !cookies.isEmpty());
 		log.put("headersCount", headers.size());
 		log.put("timestamp", System.currentTimeMillis());
 		log.put("exception", exception.getClass().getName());

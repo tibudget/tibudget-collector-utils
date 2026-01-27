@@ -42,7 +42,6 @@ class AbstractCollectorPluginTest {
             }
         };
 
-        plugin.getCookies().put("SESSION", "secret");
         plugin.addHeader("Authorization", "Bearer secret");
     }
 
