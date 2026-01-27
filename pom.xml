@@ -53,10 +53,16 @@
             <version>1.22.1</version>
         </dependency>
         <dependency>
-            <!-- Marked as provided by jsoup but we need it -->
+            <!-- Dex/R8 requires optional deps to be included -->
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
             <version>1.0.0</version>
+        </dependency>
+        <dependency>
+            <!-- Dex/R8 requires optional deps to be included -->
+            <groupId>com.google.re2j</groupId>
+            <artifactId>re2j</artifactId>
+            <version>1.8</version>
         </dependency>
 
         <dependency>
