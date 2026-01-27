@@ -72,6 +72,15 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		initDefaultHeaders();
 	}
 
+	/**
+	 * Provides the logger instance for the class. Useful for testing.
+	 *
+	 * @return The Logger instance associated with this class.
+	 */
+	protected Logger getLogger() {
+		return LOG;
+	}
+
 	private void initDefaultHeaders() {
 		addHeader("User-Agent", getUserAgent());
 		addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
@@ -192,7 +201,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			return doc;
 
 		} catch (IOException e) {
-			throw new TemporaryUnavailable("Network error", e);
+			logNetworkError("get", url, e);
+			throw new TemporaryUnavailable("Network error (" + e.getMessage() + ")", e);
 		}
 	}
 
@@ -219,7 +229,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			return doc;
 
 		} catch (IOException e) {
-			throw new TemporaryUnavailable("Network error", e);
+			logNetworkError("postForm", url, e);
+			throw new TemporaryUnavailable("Network error (" + e.getMessage() + ")", e);
 		}
 	}
 
@@ -261,7 +272,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers, cookies);
 			return handleJsonResponse(clazz, response);
 		} catch (IOException e) {
-			throw new TemporaryUnavailable("Network error", e);
+			logNetworkError("getJson", url, e);
+			throw new TemporaryUnavailable("Network error (" + e.getMessage() + ")", e);
 		}
 	}
 
@@ -275,7 +287,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			InternetProvider.Response response = internetProvider.post(getFullURL(url), json, "application/json", headers, cookies);
 			return handleJsonResponse(clazz, response);
 		} catch (IOException e) {
-			throw new TemporaryUnavailable("Network error", e);
+			logNetworkError("postJson", url, e);
+			throw new TemporaryUnavailable("Network error (" + e.getMessage() + ")", e);
 		}
 	}
 
@@ -290,14 +303,14 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	protected File download(String urlStr, String contentType) {
 		String fullUrl = getFullURL(urlStr);
 		if (fullUrl == null) {
-			LOG.severe("Cannot download from null URL");
+			getLogger().severe("Cannot download from null URL");
 			return null;
 		}
 
 		try {
 			return download(new URL(fullUrl), contentType);
 		} catch (MalformedURLException e) {
-			LOG.log(Level.SEVERE, "Invalid URL: " + fullUrl, e);
+			getLogger().log(Level.SEVERE, "Invalid URL: " + fullUrl, e);
 			return null;
 		}
 	}
@@ -317,17 +330,20 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
+		if (url == null) {
+			throw new IllegalArgumentException("URL to download cannot be null");
+		}
 
 		waitForNextRequest();
 		prepareHeaders(false, false);
 
-		LOG.fine("GET " + url);
+		getLogger().fine("GET " + url);
 
 		try {
 			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, cookies, contentType);
 			return new File(response.body);
 		} catch (IOException e) {
-			LOG.log(Level.SEVERE, "Download failed: " + url, e);
+			logNetworkError("postForm", url.toString(), e);
 			return null;
 		}
 	}
@@ -358,7 +374,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			}
 			return object;
 		} catch (JsonSyntaxException e) {
-			throw new CollectError("Invalid JSON format", e);
+			throw new CollectError("Invalid JSON format: " + e.getMessage(), e);
 		}
 	}
 
@@ -403,7 +419,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	protected void setProgress(int value) {
 		progress = Math.max(0, Math.min(100, value));
-		LOG.info("Progress: " + progress + "%");
+		getLogger().info("Progress: " + progress + "%");
 	}
 
 	protected String getCurrentUrl() {
@@ -454,6 +470,64 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	protected void setMinIntervalBetweenRequestInMs(long value) {
 		this.minIntervalBetweenRequestInMs = value;
+	}
+
+	protected void logNetworkError(
+			String operation,
+			String url,
+			Exception exception
+	) {
+		Map<String, Object> log = new LinkedHashMap<>();
+
+		log.put("type", "network_error");
+		log.put("operation", operation);
+		log.put("url", sanitizeUrl(url));
+		log.put("currentUrl", sanitizeUrl(currentUrl));
+		log.put("lastUrl", sanitizeUrl(lastUrl));
+		log.put("hasCookies", !cookies.isEmpty());
+		log.put("headersCount", headers.size());
+		log.put("timestamp", System.currentTimeMillis());
+		log.put("exception", exception.getClass().getName());
+		log.put("message", exception.getMessage());
+		log.put("stackTrace", stackTraceToString(exception));
+
+		getLogger().severe(toJsonLine(log));
+	}
+
+	private String sanitizeUrl(String url) {
+		if (url == null) return null;
+
+		// Remove query params to avoid leaking tokens
+		int idx = url.indexOf('?');
+		return idx > 0 ? url.substring(0, idx) + "?[query removed for confidentiality reasons]" : url;
+	}
+
+	private String toJsonLine(Map<String, Object> map) {
+		try {
+			return gson.toJson(map);
+		} catch (Exception e) {
+			return "{\"type\":\"network_error\",\"error\":\"json_serialization_failed\"}";
+		}
+	}
+
+	private String stackTraceToString(Throwable t) {
+		StringBuilder sb = new StringBuilder();
+
+		sb.append(t.toString());
+
+		for (StackTraceElement el : t.getStackTrace()) {
+			sb.append(" | at ")
+					.append(el.getClassName())
+					.append(".")
+					.append(el.getMethodName())
+					.append("(")
+					.append(el.getFileName())
+					.append(":")
+					.append(el.getLineNumber())
+					.append(")");
+		}
+
+		return sb.toString();
 	}
 
 }
