@@ -9,7 +9,6 @@ import com.tibudget.api.exceptions.CollectError;
 import com.tibudget.api.exceptions.ConnectionFailure;
 import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
-import com.tibudget.dto.MessageDto;
 import com.tibudget.dto.TransactionDto;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -29,64 +28,51 @@ import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Base implementation for collector plugins.
+ * <p>
+ * This class provides common HTTP handling, cookie management,
+ * throttling, HTML parsing and JSON deserialization utilities.
+ */
 public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	private static final Logger LOG = Logger.getLogger(AbstractCollectorPlugin.class.getName());
 
-	private Gson gson;
+	protected InternetProvider internetProvider;
+	protected CounterpartyProvider counterpartyProvider;
+	protected OTPProvider otpProvider;
+	protected PDFToolsProvider pdfToolsProvider;
 
-	public InternetProvider internetProvider;
+	protected final Map<String, String> settings = new HashMap<>();
+	protected final Map<String, String> cookies = new HashMap<>();
+	protected final Map<String, String> headers = new HashMap<>();
 
-	public CounterpartyProvider counterpartyProvider;
-
-	public OTPProvider otpProvider;
-
-	public PDFToolsProvider pdfToolsProvider;
-
-	public final Map<String, String> settings;
-
-	public final Map<String, String> cookies;
-
-	private final Map<String, String> headers;
-
-	public List<TransactionDto> transactions;
+	protected final List<TransactionDto> transactions = new ArrayList<>();
 
 	/**
-	 * The key will be a stable identifier known by the collector (iban or loyalty card number for exemple)
+	 * Accounts indexed by a stable reference (IBAN, card number, etc.)
 	 */
-	public Map<String, AccountDto> accounts;
+	protected final Map<String, AccountDto> accounts = new HashMap<>();
 
-	/**
-	 * To be used as a referer
-	 */
-	private String lastUrl = null;
+	private final Gson gson;
 
-	/**
-	 * To be used as a current location
-	 */
-	private String currentUrl = null;
+	private String lastUrl;
+	private String currentUrl;
 
-	/**
-	 * Minimum delay in ms between 2 requests
-	 */
 	private long minIntervalBetweenRequestInMs = 2000;
-
 	private long lastRequestTime = 0;
 
 	private int progress = 0;
 
-	public AbstractCollectorPlugin() {
-		super();
-		transactions = new ArrayList<>();
-		accounts = new HashMap<>();
-		headers = new HashMap<>();
-		settings = new HashMap<>();
-		cookies = new HashMap<>();
-		gson = new GsonBuilder()
+	protected AbstractCollectorPlugin() {
+		this.gson = new GsonBuilder()
 				.registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter())
 				.create();
 
-		// Default HTTP headers
+		initDefaultHeaders();
+	}
+
+	private void initDefaultHeaders() {
 		addHeader("User-Agent", getUserAgent());
 		addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 		addHeader("Accept-Encoding", "gzip, deflate, br, zstd");
@@ -104,300 +90,140 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	@Override
-	public void init(InternetProvider internetProvider, CounterpartyProvider counterpartyProvider, OTPProvider otpProvider, PDFToolsProvider pdfToolsProvider, Map<String, String> settings,
-					 Map<String, String> previousCookies, List<AccountDto> previousAccounts) {
+	public void init(
+			InternetProvider internetProvider,
+			CounterpartyProvider counterpartyProvider,
+			OTPProvider otpProvider,
+			PDFToolsProvider pdfToolsProvider,
+			Map<String, String> settings,
+			Map<String, String> previousCookies,
+			List<AccountDto> previousAccounts
+	) {
 		this.internetProvider = internetProvider;
 		this.counterpartyProvider = counterpartyProvider;
 		this.otpProvider = otpProvider;
 		this.pdfToolsProvider = pdfToolsProvider;
+
 		if (settings != null) {
 			this.settings.putAll(settings);
 		}
+
 		if (previousCookies != null) {
 			this.cookies.putAll(previousCookies);
 		}
+
 		if (previousAccounts != null) {
 			for (AccountDto account : previousAccounts) {
 				String ref = account.getMetadata(AccountDto.METADATA_REFERENCE);
 				if (ref == null) {
-					throw new IllegalArgumentException("AccountDto must have a reference in metadata: " + account);
+					throw new IllegalArgumentException("Account reference is missing: " + account);
 				}
-				this.accounts.put(account.getMetadata(AccountDto.METADATA_REFERENCE), account);
+				accounts.put(ref, account);
 			}
 		}
 	}
 
+	/**
+	 * Do nothing by default.
+	 * You probably need to override it if your collector uses OAuth2 to connect to the counterparty.
+	 */
 	@Override
-	public String initConnection(URI uri) {
+	public String initConnection(URI callbackUri) {
 		return "";
 	}
 
 	/**
-	 * Do nothing by default, override it if other validation are required
-	 * @return List of messages to display to the user if there is any validation problem
-	 */
-	@Override
-	public List<MessageDto> validate() {
-		return List.of();
-	}
-
-	/**
-	 * Returns the user agent of the mobile phone.
-	 * @return the user agent of the mobile phone.
-	 */
-	public String getUserAgent() {
-		String userAgent = System.getProperty("http.agent");
-		if (userAgent == null) {
-			// For testing purpose, on mobile app the property is normally set
-			userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
-		}
-		return userAgent;
-	}
-
-	public Map<String, String> getHeaders() {
-		return Collections.unmodifiableMap(headers);
-	}
-
-	public String getHeader(String header) {
-		return headers.get(header);
-	}
-
-	public void addHeader(String name, String value) {
-		if (name != null && value != null) {
-			headers.put(name.trim(), value);
-		}
-	}
-
-	@Override
-	public Map<String, String> getCookies() {
-		return cookies;
-	}
-
-	@Override
-	public List<AccountDto> getAccounts() {
-		return new ArrayList<>(accounts.values());
-	}
-
-	@Override
-	public List<TransactionDto> getTransactions() {
-		return transactions;
-	}
-
-	@Override
-	public Map<String, String> getSettings() {
-		return settings;
-	}
-
-	@Override
-	public int getProgress() {
-		return progress;
-	}
-
-	public void setProgress(int newProgress) {
-		this.progress = Math.max(0, Math.min(100, newProgress));
-		LOG.info("Progress: " + progress + "%");
-	}
-
-	/**
-	 * @return getDomain() name of server, like "https://www.mybank.com"
+	 * @return Base domain of the remote service (example: "https://www.mybank.com")
 	 */
 	public abstract String getDomain();
 
-	public Document get(String url) throws TemporaryUnavailable {
+	/**
+	 * Returns the user agent of the mobile device.
+	 */
+	protected String getUserAgent() {
+		return Optional.ofNullable(System.getProperty("http.agent"))
+				.orElse("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36");
+	}
+
+	protected void prepareHeaders(boolean ajax, boolean json) {
+		if (currentUrl != null) {
+			headers.put("Referer", currentUrl);
+		} else {
+			headers.remove("Referer");
+		}
+
+		if (ajax) {
+			headers.put("X-Requested-With", "XMLHttpRequest");
+		} else {
+			headers.remove("X-Requested-With");
+		}
+
+		if (json) {
+			headers.put("Accept", "application/json");
+			headers.put("Content-Type", "application/json");
+		}
+	}
+
+	protected String getFullURL(String url) {
+		if (url == null) return null;
+		return url.startsWith("http") ? url : getDomain() + url;
+	}
+
+	protected Document get(String url) throws TemporaryUnavailable {
 		return get(url, false);
 	}
 
-	protected String getFullURL(String relativeUrl) {
-		if (relativeUrl == null) {
-			return null;
-		}
-		String fullUrl;
-		if (relativeUrl.startsWith("http")) {
-			fullUrl = relativeUrl;
-		}
-		else {
-			fullUrl = getDomain() + relativeUrl;
-		}
-		return fullUrl;
-	}
-
-	public Document get(String url, boolean ajax) throws TemporaryUnavailable {
-		if (internetProvider == null) {
-			throw new IllegalStateException("InternetProvider not provided");
-		}
-		String fullUrl = getFullURL(url);
-		LOG.fine("GET " + fullUrl);
+	protected Document get(String url, boolean ajax) throws TemporaryUnavailable {
 		waitForNextRequest();
-		try {
+		prepareHeaders(ajax, false);
 
-			if (currentUrl != null) {
-				headers.put("Referer", currentUrl);
-			}
-			else {
-				headers.remove("Referer");
-			}
-			if (ajax) {
-				headers.put("X-Requested-With", "XMLHttpRequest");
-			}
-			else {
-				headers.remove("X-Requested-With");
-			}
-			InternetProvider.Response response = internetProvider.get(fullUrl, headers, cookies);
+		try {
+			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers, cookies);
+
+			cookies.clear();
+			cookies.putAll(response.cookies);
 
 			if (response.code != 200) {
-				StringBuilder msg = new StringBuilder();
-				msg.append("HTTP/").append(response.protocol).append(" GET ").append(fullUrl).append(" => Error ").append(response.code).append(": ").append(response.message);
-				for (Map.Entry<String, String> header : headers.entrySet()) {
-					msg.append("\n").append(header.getKey()).append(": ").append(header.getValue());
-				}
-				for (Map.Entry<String, String> cookie : cookies.entrySet()) {
-					msg.append("\n").append(cookie.getKey()).append(": ").append(cookie.getValue());
-				}
-				throw new TemporaryUnavailable(msg.toString());
+				throw new TemporaryUnavailable("HTTP error " + response.code);
 			}
+
+			Document doc = Jsoup.parse(response.body, response.location);
+			if (!ajax) setNewLocation(doc.location());
+			return doc;
+
+		} catch (IOException e) {
+			throw new TemporaryUnavailable("Network error", e);
+		}
+	}
+
+	protected Document postForm(String url, Map<String, String> data) throws TemporaryUnavailable {
+		return postForm(url, data, false);
+	}
+
+	protected Document postForm(String url, Map<String, String> data, boolean ajax) throws TemporaryUnavailable {
+		waitForNextRequest();
+		prepareHeaders(ajax, false);
+
+		try {
+			String payload = buildFormEncodedPayload(data);
+			InternetProvider.Response response =
+					internetProvider.post(getFullURL(url), payload,
+							"application/x-www-form-urlencoded; charset=UTF-8",
+							headers, cookies);
 
 			cookies.clear();
 			cookies.putAll(response.cookies);
 
 			Document doc = Jsoup.parse(response.body, response.location);
 			if (!ajax) setNewLocation(doc.location());
-			LOG.fine("  |-> GET (" + response.protocol + ") " + response.location);
 			return doc;
-		} catch (IOException e) {
-			throw new TemporaryUnavailable("error.tmpunavailable", e);
-		}
-	}
-
-	private void updateCookies(List<String> setCookies) {
-		for (String header : setCookies) {
-			String[] parts = header.split(";")[0].split("=", 2);
-			if (parts.length == 2) {
-				cookies.put(parts[0].trim(), parts[1].trim());
-			}
-		}
-	}
-
-	public void setNewLocation(String url) {
-		lastUrl = currentUrl;
-		currentUrl = url;
-	}
-
-	public Document post(String relativeUrl, Map<String, String> postdata) throws TemporaryUnavailable {
-		return post(relativeUrl, postdata, false);
-	}
-
-	public static String buildFormEncodedPayload(Map<String, String> data) throws UnsupportedEncodingException {
-		StringBuilder result = new StringBuilder();
-		for (Map.Entry<String, String> entry : data.entrySet()) {
-			if (result.length() > 0) {
-				result.append("&");
-			}
-			result.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8));
-			result.append("=");
-			result.append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
-		}
-		return result.toString();
-	}
-
-	public Document post(String url, Map<String, String> postdatas, boolean ajax) throws TemporaryUnavailable {
-		if (internetProvider == null) {
-			throw new IllegalStateException("InternetProvider not provided");
-		}
-		String fullUrl = getFullURL(url);
-		LOG.fine("POST " + fullUrl);
-		Document page;
-		try {
-			// Avoid flooding the site
-			waitForNextRequest();
-
-			// Very important because it is checked by security systems on the server side
-			if (currentUrl != null) {
-				headers.put("Referer", currentUrl);
-			}
-			else {
-				headers.remove("Referer");
-			}
-
-			// Execute the POST request with current cookies
-			InternetProvider.Response response = internetProvider.post(fullUrl, buildFormEncodedPayload(postdatas), "application/x-www-form-urlencoded; charset=" + StandardCharsets.UTF_8, headers, cookies);
-
-			// Parse the returned document
-			page = Jsoup.parse(response.body, response.location);
 
 		} catch (IOException e) {
-			throw new TemporaryUnavailable("error.tmpunavailable", e);
+			throw new TemporaryUnavailable("Network error", e);
 		}
-
-		if (!ajax) {
-			// Define the new location (from 'page' because it can be redirected)
-			setNewLocation(page.location());
-		}
-
-		LOG.fine("  |-> POST " + page.location());
-		return page;
 	}
 
-	public Document post(String url, String datas) throws TemporaryUnavailable {
-		return post(url, datas, false, false);
-	}
-
-	public Document post(String url, String datas, boolean ajax, boolean isJson) throws TemporaryUnavailable {
-		if (internetProvider == null) {
-			throw new IllegalStateException("InternetProvider not provided");
-		}
-		String fullUrl = getFullURL(url);
-		LOG.fine("POST " + fullUrl);
-		Document page;
-		try {
-			// Avoid flooding the site
-			waitForNextRequest();
-
-			// Prepare the POST request
-			if (isJson) {
-				headers.put("Accept", "*/*");
-				headers.put("Content-type", "application/json");
-				headers.put("Content-length", String.valueOf(datas.length()));
-			}
-
-			// Very important because it is checked by security systems on the server side
-			if (currentUrl != null) {
-				headers.put("Referer", currentUrl);
-			}
-			else {
-				headers.remove("Referer");
-			}
-
-			if (ajax) {
-				headers.put("X-Requested-With", "XMLHttpRequest");
-			}
-			else {
-				headers.remove("X-Requested-With");
-			}
-
-			// Execute the POST request
-			InternetProvider.Response response = internetProvider.post(fullUrl, datas, "application/json", headers, cookies);
-
-			// Update the cookies
-			this.cookies.clear();
-			this.cookies.putAll(response.cookies);
-
-			// Parse the returned document
-			page = Jsoup.parse(response.body, response.location);
-
-		} catch (IOException e) {
-			throw new TemporaryUnavailable("error.tmpunavailable", e);
-		}
-
-		if (!ajax) {
-			// Define the new location (from 'page' because it can be redirected)
-			setNewLocation(page.location());
-		}
-
-		LOG.fine("  |-> POST " + page.location());
-		return page;
-	}
-
-	public Document postForm(Document page, String formSelector, Map<String, String> fieldsValues) throws TemporaryUnavailable {
+	protected Document postForm(Document page, String formSelector, Map<String, String> fieldsValues) throws TemporaryUnavailable {
 		Map<String, String> formData = new HashMap<>();
 
 		// Find the form
@@ -420,188 +246,214 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 
 		// Replace or add values
-        formData.putAll(fieldsValues);
+		formData.putAll(fieldsValues);
 
-		return post(formUrl, formData, false);
+		return postForm(formUrl, formData, false);
 	}
 
-	public File downloadUnkownContentType(String urlStr) {
-		return download(urlStr, null);
-	}
-
-	public File download(String urlStr, String contentType) {
-		String fullUrl = getFullURL(urlStr);
-        try {
-			if (fullUrl == null) {
-				LOG.log(Level.SEVERE, "Cannot download from NULL URL");
-				return null;
-			}
-			URL url = new URL(fullUrl);
-			return download(url, contentType);
-        } catch (MalformedURLException e) {
-			LOG.log(Level.SEVERE, "Cannot download from URL: " + fullUrl, e);
-            return null;
-        }
-    }
-
-	public File downloadUnkownContentType(URL url) {
-		return download(url, null);
-	}
-
-	public File download(URL url, String contentType) {
-		if (internetProvider == null) {
-			throw new IllegalStateException("InternetProvider not provided");
-		}
-
-		// Very important because it is checked by security systems on the server side
-		if (currentUrl != null) {
-			headers.put("Referer", currentUrl);
-		}
-		else {
-			headers.remove("Referer");
-		}
-
-		headers.remove("X-Requested-With");
-
-		LOG.fine("GET " + url.toString());
-		File downloadedFile = null;
-		try {
-			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, cookies, contentType);
-			downloadedFile = new File(response.body);
-		} catch (IOException e) {
-			LOG.log(Level.SEVERE, "Ignoring IOException (on page download): " + e.getMessage(), e);
-		}
-		return downloadedFile;
-	}
-
-	public <T> T get(String url, Class<T> clazz)
+	protected <T> T getJson(String url, Class<T> clazz)
 			throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure {
-		if (internetProvider == null) {
-			throw new IllegalStateException("InternetProvider not provided");
-		}
-		String fullUrl = getFullURL(url);
-		InternetProvider.Response response;
-		try {
-			// Make sure the Accept header is JSON
-			addHeader("Accept", "application/json");
-			response = internetProvider.get(
-					fullUrl,
-					getHeaders(),
-					getCookies()
-			);
-		} catch (IOException e) {
-			throw new TemporaryUnavailable(e.getMessage());
-		}
 
-		return handleJsonResponse(clazz, response);
+		waitForNextRequest();
+		prepareHeaders(false, true);
+
+		try {
+			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers, cookies);
+			return handleJsonResponse(clazz, response);
+		} catch (IOException e) {
+			throw new TemporaryUnavailable("Network error", e);
+		}
 	}
 
-	public <T> T post(String url, Class<T> clazz, PostData postData)
+	protected <T> T postJson(String url, String json, Class<T> clazz)
 			throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure {
-		if (internetProvider == null) {
-			throw new IllegalStateException("InternetProvider not provided");
-		}
-		String fullUrl = getFullURL(url);
 
-		Map<String, String> headers = new HashMap<>(getHeaders());
-		InternetProvider.Response response;
+		waitForNextRequest();
+		prepareHeaders(false, true);
+
 		try {
-			// Make sure the Accept header is JSON
-			addHeader("Accept", "application/json");
-			response = internetProvider.post(
-					fullUrl,
-					postData.build(),
-					postData.getContentType(),
-					headers,
-					getCookies()
-			);
+			InternetProvider.Response response = internetProvider.post(getFullURL(url), json, "application/json", headers, cookies);
+			return handleJsonResponse(clazz, response);
 		} catch (IOException e) {
-			throw new TemporaryUnavailable(e.getMessage());
+			throw new TemporaryUnavailable("Network error", e);
 		}
-
-		T result;
-		try {
-			result = handleJsonResponse(clazz, response);
-		}
-		catch (Exception e) {
-			LOG.log(Level.SEVERE, e.getMessage() + " - POST " + fullUrl + " clazz=" + clazz + " headers=" + headers + " " + postData);
-			throw e;
-		}
-		return result;
-	}
-
-	private <T> T handleJsonResponse(Class<T> clazz, InternetProvider.Response response) throws AccessDeny, TemporaryUnavailable, ConnectionFailure, CollectError {
-		if (response.code == 403 || response.code == 401) {
-			throw new AccessDeny("Access denied (" + response.code + ")");
-		}
-
-		if (response.code >= 500 && response.code < 600) {
-			throw new TemporaryUnavailable("Server error: " + response.code + " - " + response.message);
-		}
-
-		if (response.code >= 400 && response.code < 500) {
-			throw new CollectError("Bad request (or something): " + response.code + " - " + response.message);
-		}
-
-		if (response.code < 200 || response.code >= 300) {
-			throw new ConnectionFailure("Unexpected HTTP status: " + response.code + " - " + response.message);
-		}
-
-		T object;
-		try {
-			object = gson.fromJson(response.body, clazz);
-			if (object == null) {
-				LOG.log(Level.SEVERE, "fromJson returned null object for class " + clazz + " with JSON: " + response.body);
-				throw new CollectError("Invalid or incomplete object");
-			}
-		} catch (JsonSyntaxException e) {
-			LOG.log(Level.SEVERE, "Invalid JSON format for class " + clazz + " with JSON: " + response.body, e);
-			throw new CollectError("Invalid JSON format", e);
-		}
-		return object;
-	}
-
-	public String getCurrentUrl() {
-        return currentUrl;
-    }
-
-	public String getLastUrl() {
-        return lastUrl;
-    }
-
-	public long getMinIntervalBetweenRequestInMs() {
-		return minIntervalBetweenRequestInMs;
-	}
-
-	public void setMinIntervalBetweenRequestInMs(long minIntervalBetweenRequestInMs) {
-		this.minIntervalBetweenRequestInMs = minIntervalBetweenRequestInMs;
 	}
 
 	/**
-	 * Ensures that a minimum interval between requests is respected.
-	 * If the last request was made less than the defined minimum interval ago,
-	 * this method will pause execution until the required time has elapsed.
-	 * <p>
-	 * The delay helps prevent excessive requests to the server, reducing
-	 * the risk of being rate-limited or blocked.
-	 * <p>
-	 * This method is called before executing any HTTP request.
+	 * Downloads a remote resource using the current session context
+	 * (cookies, headers, referer and throttling).
+	 *
+	 * @param urlStr Absolute or relative URL of the resource
+	 * @param contentType Optional content type override
+	 * @return The downloaded file, or null if the download failed
 	 */
-	public void waitForNextRequest() {
-		if (lastRequestTime > 0) {
-			long now = System.currentTimeMillis();
-			long elapsedTime = now - lastRequestTime;
+	protected File download(String urlStr, String contentType) {
+		String fullUrl = getFullURL(urlStr);
+		if (fullUrl == null) {
+			LOG.severe("Cannot download from null URL");
+			return null;
+		}
 
-			if (elapsedTime < minIntervalBetweenRequestInMs) {
+		try {
+			return download(new URL(fullUrl), contentType);
+		} catch (MalformedURLException e) {
+			LOG.log(Level.SEVERE, "Invalid URL: " + fullUrl, e);
+			return null;
+		}
+	}
+
+	protected File downloadUnkownContentType(String urlStr) {
+		return download(urlStr, null);
+	}
+
+	/**
+	 * Downloads a remote resource using the current session context.
+	 *
+	 * @param url Absolute URL
+	 * @param contentType Optional content type override
+	 * @return The downloaded file, or null if the download failed
+	 */
+	protected File download(URL url, String contentType) {
+		if (internetProvider == null) {
+			throw new IllegalStateException("InternetProvider not provided");
+		}
+
+		waitForNextRequest();
+		prepareHeaders(false, false);
+
+		LOG.fine("GET " + url);
+
+		try {
+			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, cookies, contentType);
+			return new File(response.body);
+		} catch (IOException e) {
+			LOG.log(Level.SEVERE, "Download failed: " + url, e);
+			return null;
+		}
+	}
+
+	protected File downloadUnkownContentType(URL url) {
+		return download(url, null);
+	}
+
+	private <T> T handleJsonResponse(Class<T> clazz, InternetProvider.Response response)
+			throws AccessDeny, TemporaryUnavailable, ConnectionFailure, CollectError {
+
+		if (response.code == 401 || response.code == 403) {
+			throw new AccessDeny("Access denied");
+		}
+
+		if (response.code >= 500) {
+			throw new TemporaryUnavailable("Server error " + response.code);
+		}
+
+		if (response.code >= 400) {
+			throw new CollectError("Client error " + response.code);
+		}
+
+		try {
+			T object = gson.fromJson(response.body, clazz);
+			if (object == null) {
+				throw new CollectError("Empty JSON response");
+			}
+			return object;
+		} catch (JsonSyntaxException e) {
+			throw new CollectError("Invalid JSON format", e);
+		}
+	}
+
+	protected static String buildFormEncodedPayload(Map<String, String> data)
+			throws UnsupportedEncodingException {
+
+		StringBuilder result = new StringBuilder();
+		for (Map.Entry<String, String> entry : data.entrySet()) {
+			if (result.length() > 0) result.append("&");
+			result.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8));
+			result.append("=");
+			result.append(URLEncoder.encode(
+					Objects.toString(entry.getValue(), ""),
+					StandardCharsets.UTF_8
+			));
+		}
+		return result.toString();
+	}
+
+	protected void setNewLocation(String url) {
+		lastUrl = currentUrl;
+		currentUrl = url;
+	}
+
+	protected void waitForNextRequest() {
+		if (lastRequestTime > 0) {
+			long elapsed = System.currentTimeMillis() - lastRequestTime;
+			if (elapsed < minIntervalBetweenRequestInMs) {
 				try {
-					long sleepTime = minIntervalBetweenRequestInMs - elapsedTime;
-					LOG.fine("Waiting " + sleepTime + "ms before next request...");
-					Thread.sleep(sleepTime);
-				} catch (InterruptedException e) {
-					// Ignore
+					Thread.sleep(minIntervalBetweenRequestInMs - elapsed);
+				} catch (InterruptedException ignored) {
 				}
 			}
 		}
 		lastRequestTime = System.currentTimeMillis();
 	}
+
+	@Override
+	public int getProgress() {
+		return progress;
+	}
+
+	protected void setProgress(int value) {
+		progress = Math.max(0, Math.min(100, value));
+		LOG.info("Progress: " + progress + "%");
+	}
+
+	protected String getCurrentUrl() {
+		return currentUrl;
+	}
+
+	protected String getLastUrl() {
+		return lastUrl;
+	}
+
+	@Override
+	public Map<String, String> getCookies() {
+		return cookies;
+	}
+
+	@Override
+	public Map<String, String> getSettings() {
+		return settings;
+	}
+
+	@Override
+	public List<AccountDto> getAccounts() {
+		return new ArrayList<>(accounts.values());
+	}
+
+	@Override
+	public List<TransactionDto> getTransactions() {
+		return transactions;
+	}
+
+	protected Map<String, String> getHeaders() {
+		return Collections.unmodifiableMap(headers);
+	}
+
+	protected String getHeader(String name) {
+		return headers.get(name);
+	}
+
+	protected void addHeader(String name, String value) {
+		if (name != null && value != null) {
+			headers.put(name.trim(), value);
+		}
+	}
+
+	protected long getMinIntervalBetweenRequestInMs() {
+		return minIntervalBetweenRequestInMs;
+	}
+
+	protected void setMinIntervalBetweenRequestInMs(long value) {
+		this.minIntervalBetweenRequestInMs = value;
+	}
+
 }
