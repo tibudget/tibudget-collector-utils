@@ -222,6 +222,28 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
+	public <T> T postJson(String url, Class<T> clazz, PostData postData) throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure {
+		waitForNextRequest();
+		prepareHeaders(false, true);
+
+		try {
+			InternetProvider.Response response =
+					internetProvider.post(
+							getFullURL(url),
+							postData.build(),
+							postData.getContentType(),
+							headers);
+
+			Document doc = Jsoup.parse(response.body, response.location);
+			setNewLocation(doc.location());
+			return handleJsonResponse(clazz, response);
+
+		} catch (IOException e) {
+			logNetworkError("postJson", url, e);
+			throw new TemporaryUnavailable("Network error (" + e.getMessage() + ")", e);
+		}
+	}
+
 	protected Document postForm(Document page, String formSelector, Map<String, String> fieldsValues) throws TemporaryUnavailable {
 		Map<String, String> formData = new HashMap<>();
 
