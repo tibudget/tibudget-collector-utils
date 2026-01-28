@@ -141,11 +141,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public abstract String getDomain();
 
 	/**
-	 * Returns the user agent of the mobile device.
+	 * Returns the user agent of the mobile device or a default one if none is found.
 	 */
 	protected String getUserAgent() {
-		return Optional.ofNullable(System.getProperty("http.agent"))
-				.orElse("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36");
+		return Optional.ofNullable(settings.get("user-agent"))
+				.orElse("Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
 	}
 
 	protected void prepareHeaders(boolean ajax, boolean json) {
