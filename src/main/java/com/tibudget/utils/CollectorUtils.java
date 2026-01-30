@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.util.Date;
@@ -207,4 +209,53 @@ public final class CollectorUtils {
                 : new Date(Long.parseLong(value));
     }
 
+    /**
+     * Masks the domain part of an email address.
+     * <p>
+     * Examples:
+     *  - john.doe@gmail.com  -> john.doe@***.**
+     *  - user@amazon.co.uk  -> user@***.**
+     * <p>
+     * If the input is not a valid email, it is returned as-is.
+     */
+    public static String maskEmail(String email) {
+        if (email == null || email.isBlank()) {
+            return email;
+        }
+
+        int atIndex = email.indexOf('@');
+        if (atIndex <= 0 || atIndex == email.length() - 1) {
+            return email;
+        }
+
+        String localPart = email.substring(0, atIndex);
+        return localPart + "@***.**";
+    }
+
+    /**
+     * Computes a stable MD5 hash of the given input string.
+     * <p>
+     * This method is intended for technical identifiers
+     * (cache keys, configuration IDs), not for security purposes.
+     */
+    public static String hash(String input) {
+        if (input == null || input.isBlank()) {
+            return null;
+        }
+
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+
+        } catch (Exception e) {
+            // MD5 is always available in Java SE
+            return null;
+        }
+    }
 }

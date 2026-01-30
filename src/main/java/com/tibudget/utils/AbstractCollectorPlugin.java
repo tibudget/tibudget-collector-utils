@@ -48,6 +48,10 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	protected final List<TransactionDto> transactions = new ArrayList<>();
 
+	private String configurationIdHash = null;
+
+	private String configurationName = null;
+
 	/**
 	 * Accounts indexed by a stable reference (IBAN, card number, etc.)
 	 */
@@ -134,13 +138,22 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return null;
 	}
 
-	/**
-	 * Do nothing by default.
-	 * Check the documentation of the API to know what to return.
-	 */
 	@Override
 	public String getConfigurationName() {
-		return null;
+		return configurationName;
+	}
+
+	public void setConfigurationIdHash(String configurationIdHash) {
+		this.configurationIdHash = configurationIdHash;
+	}
+
+	public void setConfigurationName(String configurationName) {
+		this.configurationName = configurationName;
+	}
+
+	@Override
+	public String getConfigurationIdHash() {
+		return configurationIdHash;
 	}
 
 	/**
