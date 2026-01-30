@@ -80,10 +80,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return LOG;
 	}
 
-	private void initDefaultHeaders() {
+	protected void initDefaultHeaders() {
 		addHeader("User-Agent", getUserAgent());
 		addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-		addHeader("Accept-Encoding", "gzip, deflate, br, zstd");
 		addHeader("Accept-Language", Locale.getDefault().toLanguageTag() + "," + Locale.getDefault().getLanguage() + ";q=1");
 		addHeader("Sec-GPC", "1");
 		addHeader("Connection", "keep-alive");
@@ -132,7 +131,16 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 */
 	@Override
 	public String initConnection(URI callbackUri) {
-		return "";
+		return null;
+	}
+
+	/**
+	 * Do nothing by default.
+	 * Check the documentation of the API to know what to return.
+	 */
+	@Override
+	public String getConfigurationName() {
+		return null;
 	}
 
 	/**
