@@ -32,6 +32,11 @@ class AbstractCollectorPluginTest {
             }
 
             @Override
+            public String getConfigurationIdHash() {
+                return "123";
+            }
+
+            @Override
             public String getDomain() {
                 return "https://example.com";
             }
