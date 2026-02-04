@@ -23,7 +23,7 @@
         <junit.jupiter.version>5.14.2</junit.jupiter.version>
 
         <!-- ti'bu API version -->
-        <tibudget.api.version>0.42</tibudget.api.version>
+        <tibudget.api.version>0.43</tibudget.api.version>
     </properties>
 
     <scm>
