@@ -6,20 +6,20 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.text.NumberFormat;
-import java.text.ParseException;
+import java.text.Normalizer;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
-import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 public final class CollectorUtils {
 
     private static final Logger LOG = Logger.getLogger(CollectorUtils.class.getName());
 
     private static final Map<String, String> HTML_ENTITIES = new HashMap<>();
+
+    private static final Pattern SPACE_PATTERN = Pattern.compile("\\s+");
 
     static {
         // Common HTML entities
@@ -230,6 +230,106 @@ public final class CollectorUtils {
 
         String localPart = email.substring(0, atIndex);
         return localPart + "@***.**";
+    }
+    /**
+     * Masks a name by replacing each meaningful part with its initial followed by a dot.
+     *
+     * @param name the name to mask
+     * @return the masked name, or the original value if null or blank
+     */
+    public static String maskName(String name) {
+        if (isBlank(name)) {
+            return name;
+        }
+
+        String normalized = normalize(name);
+        String[] parts = SPACE_PATTERN.split(normalized);
+
+        StringBuilder result = new StringBuilder();
+
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                result.append(" ");
+            }
+            result.append(maskToken(parts[i]));
+        }
+
+        return result.toString();
+    }
+
+    /**
+     * Masks a token while preserving internal separators.
+     */
+    public static String maskToken(String token) {
+        if (isBlank(token)) {
+            return token;
+        }
+
+        if (token.contains("-")) {
+            return maskWithSeparator(token, "-", false);
+        }
+
+        if (token.contains("'")) {
+            return maskWithSeparator(token, "'", false);
+        }
+
+        return maskWord(token);
+    }
+
+    /**
+     * Masks a string using a separator and preserves formatting.
+     *
+     * @param value the value to mask
+     * @param separator the separator
+     * @param spaceAfterSeparator whether a space should be added after the separator
+     */
+    public static String maskWithSeparator(String value, String separator, boolean spaceAfterSeparator) {
+        String[] parts = value.split(Pattern.quote(separator));
+        StringBuilder sb = new StringBuilder();
+
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                sb.append(separator);
+                if (spaceAfterSeparator) {
+                    sb.append(" ");
+                }
+            }
+
+            String part = parts[i];
+            if (!isBlank(part)) {
+                sb.append(Character.toUpperCase(part.charAt(0)));
+                if (part.length() > 1) {
+                    // Do not append the dot if the part is a single letter
+                    sb.append(".");
+                }
+            }
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * Masks a single word.
+     */
+    public static String maskWord(String word) {
+        if (isBlank(word)) {
+            return word;
+        }
+        return Character.toUpperCase(word.charAt(0)) + ".";
+    }
+
+    /**
+     * Normalizes unicode characters.
+     */
+    public static String normalize(String input) {
+        return Normalizer.normalize(input.trim(), Normalizer.Form.NFC);
+    }
+
+    /**
+     * Checks if a string is null or blank.
+     */
+    public static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     /**
