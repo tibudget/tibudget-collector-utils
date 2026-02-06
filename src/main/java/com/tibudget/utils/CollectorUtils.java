@@ -1,5 +1,7 @@
 package com.tibudget.utils;
 
+import org.jsoup.nodes.Element;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -54,6 +56,21 @@ public final class CollectorUtils {
         HTML_ENTITIES.put("&kip;", "₭");
         HTML_ENTITIES.put("&rupee;", "₹");
         HTML_ENTITIES.put("&peso;", "₱");
+    }
+
+    /**
+     * Converts the text content of an HTML element to plain text.
+     * If the input element is null, a default value is returned instead.
+     *
+     * @param element The HTML element to extract and convert text from.
+     * @param defaultValue The default value to return if the input element is null.
+     * @return A plain text representation of the element's content or the default value if the element is null.
+     */
+    public static String elementToText(Element element, String defaultValue) {
+        if (element == null) {
+            return defaultValue;
+        }
+        return htmlToText(element.text(), true);
     }
 
     /**
