@@ -9,6 +9,7 @@ import com.tibudget.api.exceptions.CollectError;
 import com.tibudget.api.exceptions.ConnectionFailure;
 import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
+import com.tibudget.dto.RecurringPaymentDto;
 import com.tibudget.dto.TransactionDto;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -53,9 +54,16 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	private String configurationName = null;
 
 	/**
-	 * Accounts indexed by a stable reference (IBAN, card number, etc.)
+	 * Accounts indexed by a stable reference (IBAN, card number, etc.) provided by the collector, the value
+	 * you defined in AccountDto.id
 	 */
 	protected final Map<String, AccountDto> accounts = new HashMap<>();
+
+	/**
+	 * Recurring payments indexed by a stable reference (IBAN, card number, etc.) provided by the collector, the value
+	 * you defined in RecurringPaymentDto.id
+	 */
+	protected final Map<String, RecurringPaymentDto> recurringPayments = new HashMap<>();
 
 	private final Gson gson;
 
@@ -107,7 +115,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 			OTPProvider otpProvider,
 			PDFToolsProvider pdfToolsProvider,
 			Map<String, String> settings,
-			List<AccountDto> previousAccounts
+			List<AccountDto> previousAccounts,
+			List<RecurringPaymentDto> previousRecurringPayments
 	) {
 		this.internetProvider = internetProvider;
 		this.counterpartyProvider = counterpartyProvider;
@@ -120,11 +129,13 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 		if (previousAccounts != null) {
 			for (AccountDto account : previousAccounts) {
-				String ref = account.getMetadata(AccountDto.METADATA_REFERENCE);
-				if (ref == null) {
-					throw new IllegalArgumentException("Account reference is missing: " + account);
-				}
-				accounts.put(ref, account);
+				accounts.put(account.getId(), account);
+			}
+		}
+
+		if (previousRecurringPayments != null) {
+			for (RecurringPaymentDto recurringPayment : previousRecurringPayments) {
+				recurringPayments.put(recurringPayment.getId(), recurringPayment);
 			}
 		}
 	}
@@ -470,6 +481,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	@Override
 	public List<AccountDto> getAccounts() {
 		return new ArrayList<>(accounts.values());
+	}
+
+	@Override
+	public List<RecurringPaymentDto> getRecurringPayments() {
+		return new ArrayList<>(recurringPayments.values());
 	}
 
 	@Override
