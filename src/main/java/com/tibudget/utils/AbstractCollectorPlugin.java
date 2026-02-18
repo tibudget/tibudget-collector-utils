@@ -11,6 +11,8 @@ import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
 import com.tibudget.dto.RecurringPaymentDto;
 import com.tibudget.dto.TransactionDto;
+import com.tibudget.utils.gson.OffsetDateTimeAdapter;
+import com.tibudget.utils.gson.ZonedDateTimeAdapter;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -24,6 +26,7 @@ import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.logging.Level;
@@ -78,6 +81,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	protected AbstractCollectorPlugin() {
 		this.gson = new GsonBuilder()
 				.registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter())
+				.registerTypeAdapter(OffsetDateTime.class, new OffsetDateTimeAdapter())
 				.create();
 
 		initDefaultHeaders();
@@ -168,7 +172,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	/**
-	 * @return Base domain of the remote service (example: "https://www.mybank.com")
+	 * @return Base domain of the remote service (example: "https://www.theshop.com")
 	 */
 	public abstract String getDomain();
 

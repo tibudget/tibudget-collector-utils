@@ -12,12 +12,9 @@ import java.text.Normalizer;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 public final class CollectorUtils {
-
-    private static final Logger LOG = Logger.getLogger(CollectorUtils.class.getName());
 
     private static final Map<String, String> HTML_ENTITIES = new HashMap<>();
 
