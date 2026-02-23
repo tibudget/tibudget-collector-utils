@@ -11,6 +11,7 @@ import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
 import com.tibudget.dto.RecurringPaymentDto;
 import com.tibudget.dto.TransactionDto;
+import com.tibudget.utils.gson.InstantAdapter;
 import com.tibudget.utils.gson.OffsetDateTimeAdapter;
 import com.tibudget.utils.gson.ZonedDateTimeAdapter;
 import org.jsoup.Jsoup;
@@ -26,6 +27,7 @@ import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.util.*;
@@ -37,20 +39,23 @@ import java.util.logging.Logger;
  * <p>
  * This class provides common HTTP handling,
  * throttling, HTML parsing and JSON deserialization utilities.
+ * <p>
+ * Members or functions that must not be used by derivated collectors are private, everything else is public to make
+ * it easy to test and mock.
  */
 public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	private static final Logger LOG = Logger.getLogger(AbstractCollectorPlugin.class.getName());
 
-	protected InternetProvider internetProvider;
-	protected CounterpartyProvider counterpartyProvider;
-	protected OTPProvider otpProvider;
-	protected PDFToolsProvider pdfToolsProvider;
+	public InternetProvider internetProvider;
+	public CounterpartyProvider counterpartyProvider;
+	public OTPProvider otpProvider;
+	public PDFToolsProvider pdfToolsProvider;
 
-	protected final Map<String, String> settings = new HashMap<>();
-	protected final Map<String, String> headers = new HashMap<>();
+	public final Map<String, String> settings = new HashMap<>();
+	public final Map<String, String> headers = new HashMap<>();
 
-	protected final List<TransactionDto> transactions = new ArrayList<>();
+	public final List<TransactionDto> transactions = new ArrayList<>();
 
 	private String configurationIdHash = null;
 
@@ -60,15 +65,15 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 * Accounts indexed by a stable reference (IBAN, card number, etc.) provided by the collector, the value
 	 * you defined in AccountDto.id
 	 */
-	protected final Map<String, AccountDto> accounts = new HashMap<>();
+	public final Map<String, AccountDto> accounts = new HashMap<>();
 
 	/**
 	 * Recurring payments indexed by a stable reference (IBAN, card number, etc.) provided by the collector, the value
 	 * you defined in RecurringPaymentDto.id
 	 */
-	protected final Map<String, RecurringPaymentDto> recurringPayments = new HashMap<>();
+	public final Map<String, RecurringPaymentDto> recurringPayments = new HashMap<>();
 
-	private final Gson gson;
+	public final Gson gson;
 
 	private String lastUrl;
 	private String currentUrl;
@@ -78,10 +83,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	private int progress = 0;
 
-	protected AbstractCollectorPlugin() {
+	public AbstractCollectorPlugin() {
 		this.gson = new GsonBuilder()
 				.registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter())
 				.registerTypeAdapter(OffsetDateTime.class, new OffsetDateTimeAdapter())
+				.registerTypeAdapter(Instant.class, new InstantAdapter())
 				.create();
 
 		initDefaultHeaders();
@@ -92,11 +98,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 *
 	 * @return The Logger instance associated with this class.
 	 */
-	protected Logger getLogger() {
+	public Logger getLogger() {
 		return LOG;
 	}
 
-	protected void initDefaultHeaders() {
+	public void initDefaultHeaders() {
 		addHeader("User-Agent", getUserAgent());
 		addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
 		addHeader("Accept-Language", Locale.getDefault().toLanguageTag() + "," + Locale.getDefault().getLanguage() + ";q=1");
@@ -179,12 +185,12 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	/**
 	 * Returns the user agent of the mobile device or a default one if none is found.
 	 */
-	protected String getUserAgent() {
+	public String getUserAgent() {
 		return Optional.ofNullable(settings.get("user-agent"))
 				.orElse("Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
 	}
 
-	protected void prepareHeaders(boolean ajax, boolean json) {
+	public void prepareHeaders(boolean ajax, boolean json) {
 		if (currentUrl != null) {
 			headers.put("Referer", currentUrl);
 		} else {
@@ -203,24 +209,53 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
-	protected String getFullURL(String url) {
-		if (url == null) return null;
-		return url.startsWith("http") ? url : getDomain() + url;
+	public String getFullURL(String url) {
+
+		if (url == null) {
+			return null;
+		}
+
+		if (url.startsWith("http")) {
+			return url;
+		}
+
+		String domain = getDomain();
+
+		if (domain == null || domain.isBlank()) {
+			return url;
+		}
+
+		boolean domainEndsWithSlash = domain.endsWith("/");
+		boolean urlStartsWithSlash = url.startsWith("/");
+
+		if (domainEndsWithSlash && urlStartsWithSlash) {
+			return domain + url.substring(1);
+		}
+
+		if (!domainEndsWithSlash && !urlStartsWithSlash) {
+			return domain + "/" + url;
+		}
+
+		return domain + url;
 	}
 
-	protected Document get(String url) throws TemporaryUnavailable {
+
+	public Document get(String url) throws TemporaryUnavailable {
 		return get(url, false);
 	}
 
-	protected Document get(String url, boolean ajax) throws TemporaryUnavailable {
+	public Document get(String url, boolean ajax) throws TemporaryUnavailable {
 		waitForNextRequest();
 		prepareHeaders(ajax, false);
 
 		try {
 			InternetProvider.Response response = internetProvider.get(getFullURL(url), headers);
 
+			if (response == null) {
+				throw new TemporaryUnavailable("Empty response for " + url);
+			}
 			if (response.code != 200) {
-				throw new TemporaryUnavailable("HTTP error " + response.code);
+				throw new TemporaryUnavailable("HTTP error " + response.code + " for " + url);
 			}
 
 			Document doc = Jsoup.parse(response.body, response.location);
@@ -233,11 +268,11 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
-	protected Document postForm(String url, Map<String, String> data) throws TemporaryUnavailable {
+	public Document postForm(String url, Map<String, String> data) throws TemporaryUnavailable {
 		return postForm(url, data, false);
 	}
 
-	protected Document postForm(String url, Map<String, String> data, boolean ajax) throws TemporaryUnavailable {
+	public Document postForm(String url, Map<String, String> data, boolean ajax) throws TemporaryUnavailable {
 		waitForNextRequest();
 		prepareHeaders(ajax, false);
 
@@ -280,7 +315,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
-	protected Document postForm(Document page, String formSelector, Map<String, String> fieldsValues) throws TemporaryUnavailable {
+	public Document postForm(Document page, String formSelector, Map<String, String> fieldsValues) throws TemporaryUnavailable {
 		Map<String, String> formData = new HashMap<>();
 
 		// Find the form
@@ -308,7 +343,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return postForm(formUrl, formData, false);
 	}
 
-	protected <T> T getJson(String url, Class<T> clazz)
+	public <T> T getJson(String url, Class<T> clazz)
 			throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure {
 
 		waitForNextRequest();
@@ -323,7 +358,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
-	protected <T> T postJson(String url, String json, Class<T> clazz)
+	public <T> T postJson(String url, String json, Class<T> clazz)
 			throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure {
 
 		waitForNextRequest();
@@ -346,7 +381,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 * @param contentType Optional content type override
 	 * @return The downloaded file, or null if the download failed
 	 */
-	protected File download(String urlStr, String contentType) {
+	public File download(String urlStr, String contentType) {
 		String fullUrl = getFullURL(urlStr);
 		if (fullUrl == null) {
 			getLogger().severe("Cannot download from null URL");
@@ -361,7 +396,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
-	protected File downloadUnkownContentType(String urlStr) {
+	public File downloadUnkownContentType(String urlStr) {
 		return download(urlStr, null);
 	}
 
@@ -372,7 +407,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 * @param contentType Optional content type override
 	 * @return The downloaded file, or null if the download failed
 	 */
-	protected File download(URL url, String contentType) {
+	public File download(URL url, String contentType) {
 		if (internetProvider == null) {
 			throw new IllegalStateException("InternetProvider not provided");
 		}
@@ -387,6 +422,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 		try {
 			InternetProvider.Response response = internetProvider.downloadFile(url.toString(), headers, contentType);
+			if (response == null) {
+				throw new IOException("Empty response for download " + url);
+			}
 
 			return new File(response.body);
 		} catch (IOException e) {
@@ -395,12 +433,16 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
-	protected File downloadUnkownContentType(URL url) {
+	public File downloadUnkownContentType(URL url) {
 		return download(url, null);
 	}
 
 	private <T> T handleJsonResponse(Class<T> clazz, InternetProvider.Response response)
 			throws AccessDeny, TemporaryUnavailable, ConnectionFailure, CollectError {
+
+		if (response == null) {
+			throw new TemporaryUnavailable("Empty response");
+		}
 
 		if (response.code == 401 || response.code == 403) {
 			throw new AccessDeny("Access denied");
@@ -425,7 +467,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 	}
 
-	protected static String buildFormEncodedPayload(Map<String, String> data)
+	public static String buildFormEncodedPayload(Map<String, String> data)
 			throws UnsupportedEncodingException {
 
 		StringBuilder result = new StringBuilder();
@@ -441,12 +483,12 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return result.toString();
 	}
 
-	protected void setNewLocation(String url) {
+	public void setNewLocation(String url) {
 		lastUrl = currentUrl;
 		currentUrl = url;
 	}
 
-	protected void waitForNextRequest() {
+	public void waitForNextRequest() {
 		if (lastRequestTime > 0) {
 			long elapsed = System.currentTimeMillis() - lastRequestTime;
 			if (elapsed < minIntervalBetweenRequestInMs) {
@@ -464,16 +506,16 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return progress;
 	}
 
-	protected void setProgress(int value) {
+	public void setProgress(int value) {
 		progress = Math.max(0, Math.min(100, value));
 		getLogger().info("Progress: " + progress + "%");
 	}
 
-	protected String getCurrentUrl() {
+	public String getCurrentUrl() {
 		return currentUrl;
 	}
 
-	protected String getLastUrl() {
+	public String getLastUrl() {
 		return lastUrl;
 	}
 
@@ -497,29 +539,29 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return transactions;
 	}
 
-	protected Map<String, String> getHeaders() {
+	public Map<String, String> getHeaders() {
 		return Collections.unmodifiableMap(headers);
 	}
 
-	protected String getHeader(String name) {
+	public String getHeader(String name) {
 		return headers.get(name);
 	}
 
-	protected void addHeader(String name, String value) {
+	public void addHeader(String name, String value) {
 		if (name != null && value != null) {
 			headers.put(name.trim(), value);
 		}
 	}
 
-	protected long getMinIntervalBetweenRequestInMs() {
+	public long getMinIntervalBetweenRequestInMs() {
 		return minIntervalBetweenRequestInMs;
 	}
 
-	protected void setMinIntervalBetweenRequestInMs(long value) {
+	public void setMinIntervalBetweenRequestInMs(long value) {
 		this.minIntervalBetweenRequestInMs = value;
 	}
 
-	protected void logNetworkError(
+	public void logNetworkError(
 			String operation,
 			String url,
 			Exception exception

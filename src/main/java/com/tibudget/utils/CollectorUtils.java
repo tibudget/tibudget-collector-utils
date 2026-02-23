@@ -340,6 +340,40 @@ public final class CollectorUtils {
     }
 
     /**
+     * To be used to clean and normalize labels for transactions, items, etc.
+     * @param input The string to clean and normalize.
+     * @return The normalized string.
+     */
+    public static String normalizeLabel(String input) {
+        if (input == null) {
+            return null;
+        }
+
+        // Normalize unicode (compose accents properly)
+        String text = Normalizer.normalize(input, Normalizer.Form.NFC);
+
+        // Replace line breaks and tabs with space
+        text = text.replaceAll("[\\r\\n\\t]+", " ");
+
+        // Replace non-breaking spaces and other weird spaces
+        text = text.replace('\u00A0', ' ');
+        text = text.replace('\u202F', ' ');
+
+        // Collapse multiple spaces into one
+        text = text.replaceAll("\\s{2,}", " ");
+
+        // Trim
+        text = text.trim();
+
+        // Capitalize first letter safely
+        if (!text.isEmpty()) {
+            text = text.substring(0, 1).toUpperCase() + text.substring(1);
+        }
+
+        return text;
+    }
+
+    /**
      * Checks if a string is null or blank.
      */
     public static boolean isBlank(String value) {

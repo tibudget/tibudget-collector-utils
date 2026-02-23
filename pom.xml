@@ -2,47 +2,39 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 
     <modelVersion>4.0.0</modelVersion>
-    <groupId>com.tibudget</groupId>
-    <artifactId>tibudget-api-utils</artifactId>
+
+    <parent>
+        <groupId>com.tibudget</groupId>
+        <artifactId>collector-parent</artifactId>
+        <version>1.0.1</version>
+    </parent>
+
+    <artifactId>tibudget-collector-utils</artifactId>
     <version>0.21-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>ti'bu API utils</name>
-    <description />
+    <name>ti'budget collectors utils</name>
+    <description>Usefull classes to implements a CollectorPlugin</description>
     <url>https://tibudget.com</url>
     <organization>
-        <name>ti'bu</name>
+        <name>ti'budget</name>
+        <url>https://tibudget.com</url>
     </organization>
-
-    <!-- Specify hard-coded project properties here -->
-    <properties>
-        <!-- To make the build platform independent -->
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.release>11</maven.compiler.release>
-        <mockito.version>5.21.0</mockito.version>
-        <junit.jupiter.version>5.14.2</junit.jupiter.version>
-
-        <!-- ti'bu API version -->
-        <tibudget.api.version>0.45</tibudget.api.version>
-    </properties>
 
     <scm>
         <connection>scm:git:https://github.com/tibudget/tibudget-collector-utils.git</connection>
+        <developerConnection>scm:git:https://github.com/tibudget/tibudget-collector-utils.git</developerConnection>
+        <url>https://github.com/tibudget/tibudget-collector-utils</url>
         <tag>HEAD</tag>
     </scm>
 
-    <distributionManagement>
-        <repository>
-            <id>tibudget-repository-release</id>
-            <name>tibudget Release Repository</name>
-            <url>s3://tibudget-maven-repository/release</url>
-        </repository>
-        <snapshotRepository>
-            <id>tibudget-repository-snapshot</id>
-            <name>tibudget Snapshot Repository</name>
-            <url>s3://tibudget-maven-repository/snapshot</url>
-        </snapshotRepository>
-    </distributionManagement>
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
 
     <dependencies>
 
@@ -50,14 +42,15 @@
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.22.1</version>
         </dependency>
+
         <dependency>
             <!-- Dex/R8 requires optional deps to be included -->
             <groupId>org.jspecify</groupId>
             <artifactId>jspecify</artifactId>
             <version>1.0.0</version>
         </dependency>
+
         <dependency>
             <!-- Dex/R8 requires optional deps to be included -->
             <groupId>com.google.re2j</groupId>
@@ -68,14 +61,12 @@
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
-            <version>2.13.2</version>
         </dependency>
 
-        <!-- The ti'bu API (Provided by ti'bu app) -->
+        <!-- The tibu API (Provided by tibu app) -->
         <dependency>
             <groupId>com.tibudget</groupId>
             <artifactId>tibudget-api</artifactId>
-            <version>${tibudget.api.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -83,7 +74,6 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>${junit.jupiter.version}</version>
             <scope>test</scope>
         </dependency>
 
@@ -91,50 +81,15 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
-            <version>${mockito.version}</version>
             <scope>test</scope>
         </dependency>
 
     </dependencies>
-
-    <build>
-        <extensions>
-            <extension>
-                <groupId>com.github.seahen</groupId>
-                <artifactId>maven-s3-wagon</artifactId>
-                <version>1.3.3</version>
-            </extension>
-        </extensions>
-        <plugins>
-            <!-- Java compiler version -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.14.1</version>
-                <configuration>
-                    <release>${maven.compiler.release}</release>
-                    <encoding>${project.build.sourceEncoding}</encoding>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.4</version>
-                <configuration>
-                    <useModulePath>false</useModulePath>
-                    <argLine>
-                        -javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar
-                    </argLine>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 
 </project>

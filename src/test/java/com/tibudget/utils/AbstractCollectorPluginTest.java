@@ -42,7 +42,7 @@ class AbstractCollectorPluginTest {
             }
 
             @Override
-            protected Logger getLogger() {
+            public Logger getLogger() {
                 return logger;
             }
         };
