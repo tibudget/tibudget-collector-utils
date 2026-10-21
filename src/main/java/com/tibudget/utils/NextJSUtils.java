@@ -1,285 +1,162 @@
 package com.tibudget.utils;
 
-import com.google.gson.Gson;
+import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.jsoup.select.Elements;
 
+import java.io.IOException;
+import java.io.StringReader;
 import java.lang.reflect.Type;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Utility class to extract Next.js Flight data from HTML pages.
- *
- * This utility parses all occurrences of:
- *
- *      self.__next_f.push([id, payload]);
- *
- * It supports:
- *  - Multi-line scripts
- *  - Escaped JavaScript strings
- *  - Non-string payloads
- *  - Multiple push calls inside the same script
- *
- * The result is returned as a Map:
- *
- *      key   = push ID (Integer)
- *      value = list of decoded payload strings
- *
- * This class is reusable for any Next.js (App Router / React Flight) page.
+ * Extracts JSON arguments from Next.js inline Flight pushes without executing JavaScript.
+ * Supports direct self.__next_f.push calls and JSON payloads (not arbitrary JS expressions).
+ * Preserves channel and chunk order. Malformed pushes or matching arrays fail explicitly;
+ * an absent key returns an empty list. Flight references and binary frames are not resolved.
  */
 public final class NextJSUtils {
+    private static final Pattern PUSH = Pattern.compile("self\\s*\\.\\s*__next_f\\s*\\.\\s*push\\s*\\(");
 
-    private NextJSUtils() {
-        // Utility class
-    }
+    private NextJSUtils() { }
 
-    /**
-     * Extracts all self.__next_f.push calls from a Jsoup Document.
-     *
-     * @param document Jsoup parsed document
-     * @return Map of push ID -> list of decoded payload chunks
-     */
+    /** Returns decoded chunks by channel. Bootstrap pushes such as [0] have no payload. */
     public static Map<Integer, List<String>> extractNextFlightPushes(Document document) {
-
         Map<Integer, List<String>> result = new LinkedHashMap<>();
-
-        if (document == null) {
-            return result;
-        }
-
-        Elements scripts = document.select("script");
-
-        if (scripts.isEmpty()) {
-            return result;
-        }
-
-        // Regex to match: self.__next_f.push([id, payload]);
-        // Supports:
-        //   - multi-line content
-        //   - string payload
-        //   - object/array payload
-        Pattern pushPattern = Pattern.compile(
-                "self\\.__next_f\\.push\\(\\[(\\d+)\\s*,\\s*(.*?)\\]\\)",
-                Pattern.DOTALL
-        );
-
-        for (Element script : scripts) {
-
-            String scriptContent = script.data();
-
-            if (scriptContent == null || scriptContent.isEmpty()) {
-                continue;
-            }
-
-            if (!scriptContent.contains("__next_f.push")) {
-                continue;
-            }
-
-            Matcher matcher = pushPattern.matcher(scriptContent);
-
-            while (matcher.find()) {
-
-                try {
-
-                    Integer pushId = Integer.parseInt(matcher.group(1));
-                    String rawPayload = matcher.group(2);
-
-                    String decodedPayload = decodePayload(rawPayload);
-
-                    result
-                            .computeIfAbsent(pushId, k -> new ArrayList<>())
-                            .add(decodedPayload);
-
-                } catch (Exception ignored) {
-                    // Skip malformed push entries safely
-                }
+        if (document == null) return result;
+        for (Element script : document.select("script")) {
+            String source = script.data();
+            Matcher call = PUSH.matcher(source);
+            if (!call.find()) continue;
+            for (int cursor = 0; cursor < source.length();) {
+                char c = source.charAt(cursor);
+                if (c == '"' || c == '\'' || c == '`') {
+                    cursor = stringEnd(source, cursor) + 1;
+                } else if (source.startsWith("//", cursor)) {
+                    int newline = source.indexOf('\n', cursor + 2);
+                    cursor = newline < 0 ? source.length() : newline + 1;
+                } else if (source.startsWith("/*", cursor)) {
+                    int end = source.indexOf("*/", cursor + 2);
+                    cursor = end < 0 ? source.length() : end + 2;
+                } else if ((cursor == 0 || !Character.isJavaIdentifierPart(source.charAt(cursor - 1)))
+                        && call.region(cursor, source.length()).lookingAt()) {
+                    int start = skipWhitespace(source, call.end());
+                    if (start == source.length() || source.charAt(start) != '[') {
+                        throw new IllegalArgumentException("Next.js Flight push must have a JSON array argument");
+                    }
+                    int end = arrayEnd(source, start);
+                    int close = skipWhitespace(source, end + 1);
+                    if (close == source.length() || source.charAt(close) != ')') {
+                        throw new IllegalArgumentException("Invalid Next.js Flight push ending");
+                    }
+                    JsonArray args = parseJson(source.substring(start, end + 1)).getAsJsonArray();
+                    if (args.size() == 0 || !args.get(0).isJsonPrimitive()
+                            || !args.get(0).getAsJsonPrimitive().isNumber()) {
+                        throw new IllegalArgumentException("Next.js Flight channel must be an integer");
+                    }
+                    int channel;
+                    try {
+                        channel = args.get(0).getAsBigDecimal().toBigIntegerExact().intValueExact();
+                    } catch (ArithmeticException e) {
+                        throw new IllegalArgumentException("Next.js Flight channel must be an integer", e);
+                    }
+                    if (args.size() > 1) {
+                        JsonElement payload = args.get(1);
+                        String chunk = payload.isJsonPrimitive() && payload.getAsJsonPrimitive().isString()
+                                ? payload.getAsString() : payload.toString();
+                        result.computeIfAbsent(channel, ignored -> new ArrayList<>()).add(chunk);
+                    }
+                    cursor = close + 1;
+                } else cursor++;
             }
         }
-
         return result;
     }
 
     /**
-     * Decodes a payload extracted from a push call.
-     *
-     * Handles:
-     *  - Quoted JavaScript strings
-     *  - Escaped characters
-     *  - Non-string payloads
-     *
-     * @param rawPayload Raw payload captured by regex
-     * @return Decoded payload
+     * Finds the first inline JSON array for an exact property name, allowing whitespace,
+     * nested arrays and delimiters in strings. Joins chunks within each channel so keys,
+     * escape sequences and arrays may span pushes. Uses the caller's Gson DTO adapters.
      */
-    private static String decodePayload(String rawPayload) {
-
-        if (rawPayload == null) {
-            return "";
-        }
-
-        rawPayload = rawPayload.trim();
-
-        // If payload is quoted string
-        if (rawPayload.startsWith("\"") && rawPayload.endsWith("\"")) {
-
-            String unquoted = rawPayload.substring(1, rawPayload.length() - 1);
-
-            return unescapeJavaScript(unquoted);
-        }
-
-        // Otherwise return as-is (object, array, number, etc.)
-        return rawPayload;
-    }
-
-    /**
-     * Basic JavaScript string unescape implementation.
-     *
-     * Handles:
-     *  - \"
-     *  - \\
-     *  - \n
-     *  - \t
-     *  - \r
-     *
-     * This avoids external dependencies.
-     *
-     * @param input Escaped JS string
-     * @return Clean string
-     */
-    private static String unescapeJavaScript(String input) {
-
-        StringBuilder result = new StringBuilder();
-        boolean escaping = false;
-
-        for (int i = 0; i < input.length(); i++) {
-
-            char current = input.charAt(i);
-
-            if (escaping) {
-
-                switch (current) {
-                    case '"':
-                        result.append('"');
-                        break;
-                    case '\\':
-                        result.append('\\');
-                        break;
-                    case 'n':
-                        result.append('\n');
-                        break;
-                    case 't':
-                        result.append('\t');
-                        break;
-                    case 'r':
-                        result.append('\r');
-                        break;
-                    case 'u':
-                        // Unicode escape handling
-                        if (i + 4 < input.length()) {
-                            String hex = input.substring(i + 1, i + 5);
-                            try {
-                                result.append((char) Integer.parseInt(hex, 16));
-                                i += 4;
-                            } catch (NumberFormatException e) {
-                                result.append("\\u").append(hex);
-                                i += 4;
-                            }
-                        }
-                        break;
-                    default:
-                        result.append(current);
-                }
-
-                escaping = false;
-
-            } else if (current == '\\') {
-                escaping = true;
-            } else {
-                result.append(current);
-            }
-        }
-
-        return result.toString();
-    }
-
-    /**
-     * Extracts and parses a JSON array by key from Next.js Flight chunks.
-     *
-     * @param pushes Map returned by extractNextFlightPushes
-     * @param key    JSON key to extract (ex: "lines", "invoices")
-     * @param clazz  DTO class
-     * @return List of parsed DTO objects
-     */
-    public static <T> List<T> extractListByKey(Gson gson, Map<Integer, List<String>> pushes, String key, Class<T> clazz) {
-
-        if (pushes == null || pushes.isEmpty()) {
-            return Collections.emptyList();
-        }
-
+    public static <T> List<T> extractListByKey(Gson gson, Map<Integer, List<String>> pushes,
+                                             String key, Class<T> clazz) {
+        Objects.requireNonNull(gson, "gson");
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(clazz, "clazz");
+        if (pushes == null || pushes.isEmpty()) return Collections.emptyList();
+        Type listType = TypeToken.getParameterized(List.class, clazz).getType();
         for (List<String> chunks : pushes.values()) {
-
-            for (String chunk : chunks) {
-
-                if (!chunk.contains("\"" + key + "\"")) {
+            String source = String.join("", chunks);
+            for (int cursor = 0; cursor < source.length();) {
+                if (source.charAt(cursor) != '"') {
+                    cursor++;
                     continue;
                 }
-
-                String jsonArray = extractJsonArrayByKey(chunk, key);
-
-                if (jsonArray == null) {
-                    continue;
+                int end = stringEnd(source, cursor);
+                int colon = skipWhitespace(source, end + 1);
+                if (colon < source.length() && source.charAt(colon) == ':'
+                        && key.equals(parseJson(source.substring(cursor, end + 1)).getAsString())) {
+                    int start = skipWhitespace(source, colon + 1);
+                    if (start < source.length() && source.charAt(start) == '[') {
+                        int arrayEnd = arrayEnd(source, start);
+                        String json = source.substring(start, arrayEnd + 1);
+                        try {
+                            JsonElement array = parseJson(json);
+                            return gson.fromJson(array, listType);
+                        } catch (JsonParseException e) {
+                            // Do not include payloads: they can contain personal information.
+                            throw new IllegalArgumentException("Invalid Next.js array for key '" + key + "'");
+                        }
+                    }
                 }
-
-                try {
-
-                    Type listType = TypeToken.getParameterized(List.class, clazz).getType();
-
-                    return gson.fromJson(jsonArray, listType);
-
-                } catch (Exception ignored) {
-                }
+                cursor = end + 1;
             }
         }
-
         return Collections.emptyList();
     }
 
-    private static String extractJsonArrayByKey(String chunk, String key) {
-
-        String search = "\"" + key + "\":[";
-
-        int start = chunk.indexOf(search);
-
-        if (start == -1) {
-            return null;
-        }
-
-        int arrayStart = chunk.indexOf("[", start);
-
-        int bracketCount = 0;
-        int end = -1;
-
-        for (int i = arrayStart; i < chunk.length(); i++) {
-
-            char c = chunk.charAt(i);
-
-            if (c == '[') bracketCount++;
-            if (c == ']') bracketCount--;
-
-            if (bracketCount == 0) {
-                end = i;
-                break;
-            }
-        }
-
-        if (end == -1) {
-            return null;
-        }
-
-        return chunk.substring(arrayStart, end + 1);
+    private static int skipWhitespace(String source, int cursor) {
+        while (cursor < source.length() && Character.isWhitespace(source.charAt(cursor))) cursor++;
+        return cursor;
     }
 
+    /** Returns the closing quote, respecting escaped quotes and escaped backslashes. */
+    private static int stringEnd(String source, int start) {
+        char quote = source.charAt(start);
+        for (int i = start + 1; i < source.length(); i++) {
+            if (source.charAt(i) == '\\') i++;
+            else if (source.charAt(i) == quote) return i;
+        }
+        throw new IllegalArgumentException("Unterminated string in Next.js data");
+    }
+
+    /** Finds the matching bracket without counting brackets inside JSON strings. */
+    private static int arrayEnd(String source, int start) {
+        int depth = 0;
+        for (int i = start; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '"') i = stringEnd(source, i);
+            else if (c == '[') depth++;
+            else if (c == ']' && --depth == 0) return i;
+        }
+        throw new IllegalArgumentException("Unterminated array in Next.js data");
+    }
+
+    private static JsonElement parseJson(String source) {
+        try (JsonReader reader = new JsonReader(new StringReader(source))) {
+            reader.setStrictness(Strictness.STRICT);
+            JsonElement value = JsonParser.parseReader(reader);
+            if (reader.peek() != JsonToken.END_DOCUMENT) {
+                throw new IllegalArgumentException("Trailing content in Next.js JSON");
+            }
+            return value;
+        } catch (IOException | JsonParseException e) {
+            throw new IllegalArgumentException("Invalid JSON in Next.js data");
+        }
+    }
 }
