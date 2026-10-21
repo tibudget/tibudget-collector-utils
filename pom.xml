@@ -6,7 +6,7 @@
     <parent>
         <groupId>com.tibudget</groupId>
         <artifactId>collector-parent</artifactId>
-        <version>1.0.6</version>
+        <version>1.0.8</version>
     </parent>
 
     <artifactId>tibudget-collector-utils</artifactId>
@@ -16,10 +16,6 @@
     <name>ti'budget collectors utils</name>
     <description>Usefull classes to implements a CollectorPlugin</description>
     <url>https://tibudget.com</url>
-    <organization>
-        <name>ti'budget</name>
-        <url>https://tibudget.com</url>
-    </organization>
 
     <scm>
         <connection>scm:git:https://github.com/tibudget/tibudget-collector-utils.git</connection>
@@ -27,14 +23,6 @@
         <url>https://github.com/tibudget/tibudget-collector-utils</url>
         <tag>HEAD</tag>
     </scm>
-
-    <licenses>
-        <license>
-            <name>MIT License</name>
-            <url>https://opensource.org/licenses/MIT</url>
-            <distribution>repo</distribution>
-        </license>
-    </licenses>
 
     <dependencies>
 
@@ -63,11 +51,9 @@
             <artifactId>gson</artifactId>
         </dependency>
 
-        <!-- The tibu API (Provided by tibu app) -->
         <dependency>
             <groupId>com.tibudget</groupId>
             <artifactId>tibudget-api</artifactId>
-            <scope>provided</scope>
         </dependency>
 
         <!-- JUnit 5 -->
