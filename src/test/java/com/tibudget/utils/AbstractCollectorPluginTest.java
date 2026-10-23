@@ -28,7 +28,8 @@ class AbstractCollectorPluginTest {
     void setUp() {
         plugin = new AbstractCollectorPlugin() {
             @Override
-            public void collect() throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure, ParameterError {
+            public boolean collect() throws CollectError, AccessDeny, TemporaryUnavailable, ConnectionFailure, ParameterError {
+                return true;
             }
 
             @Override
