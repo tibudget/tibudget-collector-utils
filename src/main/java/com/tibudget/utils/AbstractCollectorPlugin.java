@@ -51,6 +51,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public CounterpartyProvider counterpartyProvider;
 	public OTPProvider otpProvider;
 	public PDFToolsProvider pdfToolsProvider;
+	public boolean stop = false;
 
 	public final Map<String, String> settings = new HashMap<>();
 	public final Map<String, String> headers = new HashMap<>();
@@ -162,6 +163,18 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	@Override
 	public String getConfigurationName() {
 		return configurationName;
+	}
+
+	@Override
+	public void stop() {
+		stop = true;
+	}
+
+	/**
+	 * @return true if the collector must stop gracefully and save its current progress before returning from {@link #collect()}, so that the next collect can resume from where it stopped.
+	 */
+	protected boolean mustStop() {
+		return stop;
 	}
 
 	public void setConfigurationIdHash(String configurationIdHash) {
