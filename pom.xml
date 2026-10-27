@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.tibudget</groupId>
     <artifactId>tibudget-collector-utils</artifactId>
-    <version>0.28-SNAPSHOT</version>
+    <version>0.28</version>
     <packaging>jar</packaging>
 
     <name>Tibu Collector Utils</name>
@@ -22,7 +22,7 @@
         <connection>scm:git:https://github.com/tibudget/tibudget-collector-utils.git</connection>
         <developerConnection>scm:git:https://github.com/tibudget/tibudget-collector-utils.git</developerConnection>
         <url>https://github.com/tibudget/tibudget-collector-utils</url>
-        <tag>HEAD</tag>
+        <tag>0.28</tag>
     </scm>
 
     <properties>
