@@ -127,7 +127,7 @@ public class QueryParameters {
     }
 
     /**
-     * Builds the URL-encoded query string, e.g., "key1=value1&key2=value2".
+     * Builds the URL-encoded query string, for example {@code key1=value1&key2=value2}.
      *
      * @return The encoded query string, or empty string if none.
      */

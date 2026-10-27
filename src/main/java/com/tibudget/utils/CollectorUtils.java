@@ -17,6 +17,9 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Shared HTML parsing, formatting and file helpers for collectors.
+ */
 public final class CollectorUtils {
 
     private static final Map<String, String> HTML_ENTITIES = new HashMap<>();
@@ -259,7 +262,7 @@ public final class CollectorUtils {
      * Converts an HTML string into plain UTF-8 text.
      * <p>
      * This method:
-     * - removes all HTML tags
+     * - removes HTML tags using a simple text replacement
      * - decodes basic HTML entities
      * - optionally normalizes whitespace
      *

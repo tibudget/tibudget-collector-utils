@@ -25,7 +25,9 @@ public final class NextJSUtils {
 
     private NextJSUtils() { }
 
-    /** Returns decoded chunks by channel. Bootstrap pushes such as [0] have no payload. */
+    /**
+     * Returns decoded chunks by channel. Bootstrap pushes such as [0] have no payload.
+     */
     public static Map<Integer, List<String>> extractNextFlightPushes(Document document) {
         Map<Integer, List<String>> result = new LinkedHashMap<>();
         if (document == null) return result;
@@ -125,7 +127,9 @@ public final class NextJSUtils {
         return cursor;
     }
 
-    /** Returns the closing quote, respecting escaped quotes and escaped backslashes. */
+    /**
+     * Returns the closing quote, respecting escaped quotes and escaped backslashes.
+     */
     private static int stringEnd(String source, int start) {
         char quote = source.charAt(start);
         for (int i = start + 1; i < source.length(); i++) {
@@ -135,7 +139,9 @@ public final class NextJSUtils {
         throw new IllegalArgumentException("Unterminated string in Next.js data");
     }
 
-    /** Finds the matching bracket without counting brackets inside JSON strings. */
+    /**
+     * Finds the matching bracket without counting brackets inside JSON strings.
+     */
     private static int arrayEnd(String source, int start) {
         int depth = 0;
         for (int i = start; i < source.length(); i++) {

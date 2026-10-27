@@ -21,14 +21,12 @@ import java.util.logging.Logger;
  * <p>
  * This adapter enables Gson to correctly serialize and deserialize
  * {@link OffsetDateTime} instances using the ISO-8601 standard format.
- * </p>
  *
  * <p>
  * Supported example format:
  * <pre>
  *     2025-12-25T00:00:00+01:00
  * </pre>
- * </p>
  *
  * <p>
  * Behavior:
@@ -38,7 +36,6 @@ import java.util.logging.Logger;
  *     <li>Null-safe: Returns null when JSON value is null</li>
  *     <li>Graceful failure: Logs parsing errors and returns null</li>
  * </ul>
- * </p>
  *
  * <p>
  * Usage:
@@ -47,12 +44,10 @@ import java.util.logging.Logger;
  *     .registerTypeAdapter(OffsetDateTime.class, new OffsetDateTimeAdapter())
  *     .create();
  * </pre>
- * </p>
  *
  * <p>
  * This implementation uses {@link DateTimeFormatter#ISO_OFFSET_DATE_TIME}
  * to ensure global compatibility.
- * </p>
  */
 public class OffsetDateTimeAdapter
         implements JsonDeserializer<OffsetDateTime>,

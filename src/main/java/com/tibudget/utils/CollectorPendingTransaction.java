@@ -15,10 +15,14 @@ import java.util.Objects;
  * Save progress only after the corresponding transaction has been fully collected.
  */
 public class CollectorPendingTransaction {
-    /** Stable, non-blank website reference, preserved without trimming. */
+    /**
+     * Stable, non-blank website reference, preserved without trimming.
+     */
     public final String id;
 
-    /** Non-null transaction date in the account's time zone. */
+    /**
+     * Non-null transaction date in the account's time zone.
+     */
     public final LocalDate date;
 
     /**

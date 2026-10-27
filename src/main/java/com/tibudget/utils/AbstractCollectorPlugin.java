@@ -44,8 +44,9 @@ import java.util.logging.Logger;
  * This class provides common HTTP handling,
  * throttling, HTML parsing and JSON deserialization utilities.
  * <p>
- * Members or functions that must not be used by derivated collectors are private, everything else is public to make
- * it easy to test and mock.
+ * Implement {@link #getDomain()} and {@link #collect()} in your collector.
+ * Use the injected providers for requests and preserve previous DTO identity.
+ * Public helpers can be tested or mocked. Instances are not thread-safe.
  */
 public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
@@ -57,7 +58,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	public CounterpartyProvider counterpartyProvider;
 	public OTPProvider otpProvider;
 	public PDFToolsProvider pdfToolsProvider;
-	public boolean stop = false;
+	public volatile boolean stop = false;
 
 	public final Map<String, String> settings = new HashMap<>();
 	public final Map<String, String> headers = new HashMap<>();
@@ -70,13 +71,13 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	/**
 	 * Accounts indexed by a stable reference (IBAN, card number, etc.) provided by the collector, the value
-	 * you defined in AccountDto.id
+	 * returned by {@link AccountDto#getId()}
 	 */
 	public final Map<String, AccountDto> accounts = new HashMap<>();
 
 	/**
 	 * Recurring payments indexed by a stable reference (IBAN, card number, etc.) provided by the collector, the value
-	 * you defined in RecurringPaymentDto.id
+	 * returned by {@link RecurringPaymentDto#getId()}
 	 */
 	public final Map<String, RecurringPaymentDto> recurringPayments = new HashMap<>();
 
@@ -181,7 +182,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 * @return true if the collector must stop gracefully and save its current progress before returning from {@link #collect()}, so that the next collect can resume from where it stopped.
 	 */
 	protected boolean mustStop() {
-		// Tibu may want us to stop but we want to scrap at least one transaction before stopping
+		// Complete at least one transaction before honoring a stop request.
 		return stop && !transactions.isEmpty();
 	}
 
@@ -304,6 +305,13 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 							"application/x-www-form-urlencoded; charset=UTF-8",
 							headers);
 
+			if (response == null) {
+				throw new TemporaryUnavailable("Empty response for " + url);
+			}
+			if (response.code != 200) {
+				throw new TemporaryUnavailable("HTTP error " + response.code + " for " + url);
+			}
+
 			Document doc = Jsoup.parse(response.body, response.location);
 			if (!ajax) setNewLocation(doc.location());
 			return doc;
@@ -326,9 +334,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 							postData.getContentType(),
 							headers);
 
-			Document doc = Jsoup.parse(response.body, response.location);
-			setNewLocation(doc.location());
-			return handleJsonResponse(clazz, response);
+			T result = handleJsonResponse(clazz, response);
+			setNewLocation(response.location);
+			return result;
 
 		} catch (IOException e) {
 			logNetworkError("postJson", url, e);
@@ -354,7 +362,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		Elements inputs = form.select("input[name]");
 		for (Element input : inputs) {
 			String name = input.attr("name");
-			String value = input.attr("value"); // Valeur par défaut si présente
+			String value = input.attr("value"); // Use the input's default value when present.
 			formData.put(name, value);
 		}
 
@@ -466,9 +474,12 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 * @throws CollectError No matching element found
 	 */
 	protected Element required(Element parent, String selector) throws CollectError {
+		if (parent == null) {
+			throw new CollectError("Required element parent is null");
+		}
 		Element element = parent.selectFirst(selector);
 		if (element == null) {
-			throw new CollectError("starter.history.invalid");
+			throw new CollectError("Required element not found: " + selector);
 		}
 		return element;
 	}

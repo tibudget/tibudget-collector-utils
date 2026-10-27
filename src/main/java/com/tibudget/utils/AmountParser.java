@@ -12,10 +12,10 @@ import static com.tibudget.utils.CollectorUtils.htmlToText;
  * Utility class used to parse monetary amounts from HTML or plain text.
  * <p>
  * Features:
- * - HTML entity decoding (&nbsp;, &euro;, etc.)
- * - Worldwide number formats (FR, EN, DE, CH, IN, etc.)
+ * - Common HTML entity decoding
+ * - Space and apostrophe grouping separators
  * - Automatic ISO-4217 currency detection
- * - Robust decimal separator detection
+ * - The last comma or dot is treated as the decimal separator
  */
 public final class AmountParser {
 

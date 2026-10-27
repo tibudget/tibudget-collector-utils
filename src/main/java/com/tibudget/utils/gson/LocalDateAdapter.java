@@ -8,6 +8,9 @@ import com.google.gson.stream.JsonWriter;
 import java.io.IOException;
 import java.time.LocalDate;
 
+/**
+ * Reads and writes ISO dates for {@link LocalDate}; malformed dates fail explicitly.
+ */
 public class LocalDateAdapter extends TypeAdapter<LocalDate> {
     @Override
     public void write(JsonWriter out, LocalDate value) throws IOException {

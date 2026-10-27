@@ -1,6 +1,8 @@
 package com.tibudget.utils;
 
 import com.tibudget.api.exceptions.*;
+import com.tibudget.api.InternetProvider;
+import org.jsoup.Jsoup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -9,12 +11,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.logging.Logger;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 @ExtendWith(MockitoExtension.class)
 class AbstractCollectorPluginTest {
@@ -49,6 +50,40 @@ class AbstractCollectorPluginTest {
         };
 
         plugin.addHeader("Authorization", "Bearer secret");
+    }
+
+    @Test
+    void shouldRejectMissingAndFailedFormResponses() throws Exception {
+        InternetProvider internet = mock(InternetProvider.class);
+        plugin.internetProvider = internet;
+        plugin.setMinIntervalBetweenRequestInMs(0);
+        assertThrows(TemporaryUnavailable.class, () -> plugin.postForm("/login", Map.of()));
+        when(internet.post(anyString(), anyString(), anyString(), anyMap()))
+                .thenReturn(new InternetProvider.Response(503, "Unavailable", "POST", "https://example.com/login", "http/1.1", "error", Map.of()));
+        assertThrows(TemporaryUnavailable.class, () -> plugin.postForm("/login", Map.of()));
+        when(internet.post(anyString(), anyString(), anyString(), anyMap()))
+                .thenReturn(new InternetProvider.Response(200, "OK", "POST", "https://example.com/home", "http/1.1", "<p>Welcome</p>", Map.of()));
+        assertEquals("Welcome", plugin.postForm("/login", Map.of()).selectFirst("p").text());
+        assertEquals("https://example.com/home", plugin.getCurrentUrl());
+    }
+
+    @Test
+    void shouldValidateJsonPostResponseBeforeReadingItsLocation() throws Exception {
+        InternetProvider internet = mock(InternetProvider.class);
+        plugin.internetProvider = internet;
+        plugin.setMinIntervalBetweenRequestInMs(0);
+        assertThrows(TemporaryUnavailable.class, () -> plugin.postJson("/api", Map.class, new PostData().asJSON()));
+        when(internet.post(anyString(), anyString(), anyString(), anyMap()))
+                .thenReturn(new InternetProvider.Response(403, "Forbidden", "POST", "https://example.com/api", "http/1.1", "denied", Map.of()));
+        assertThrows(AccessDeny.class, () -> plugin.postJson("/api", Map.class, new PostData().asJSON()));
+        assertNull(plugin.getCurrentUrl());
+    }
+
+    @Test
+    void shouldReportMissingRequiredElementsWithoutACollectorSpecificMessageKey() throws CollectError {
+        assertThrows(CollectError.class, () -> plugin.required(null, ".order"));
+        assertThrows(CollectError.class, () -> plugin.required(Jsoup.parse("<p>empty</p>"), ".order"));
+        assertEquals("found", plugin.required(Jsoup.parse("<p class='order'>found</p>"), ".order").text());
     }
 
     @Test

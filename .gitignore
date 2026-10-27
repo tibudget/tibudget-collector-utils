@@ -4,3 +4,9 @@
 /.project
 /.idea
 *.iml
+/release.properties
+/pom.xml.releaseBackup
+/pom.xml.tag
+/pom.xml.next
+/pom.xml.branch
+/.attach_pid*

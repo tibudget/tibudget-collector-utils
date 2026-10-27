@@ -11,7 +11,9 @@ import java.util.Objects;
  * of the number of transactions: an empty page may still have a next page.
  */
 public class CollectorTransactionPage {
-    /** Unmodifiable snapshot of the pending transactions, with no null entries. */
+    /**
+     * Unmodifiable snapshot of the pending transactions, with no null entries.
+     */
     public final List<CollectorPendingTransaction> transactions;
 
     /**

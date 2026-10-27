@@ -21,7 +21,6 @@ import java.util.logging.Logger;
  * <p>
  * This adapter enables Gson to properly serialize and deserialize
  * {@link ZonedDateTime} using the ISO-8601 standard format.
- * </p>
  *
  * <p>
  * Supported example formats:
@@ -29,7 +28,6 @@ import java.util.logging.Logger;
  *     2025-12-25T00:00:00+01:00
  *     2025-12-25T00:00:00+01:00[Europe/Paris]
  * </pre>
- * </p>
  *
  * <p>
  * Behavior:
@@ -39,7 +37,6 @@ import java.util.logging.Logger;
  *     <li>Null-safe: Returns null when JSON value is null</li>
  *     <li>Graceful failure: Logs parsing errors and returns null</li>
  * </ul>
- * </p>
  *
  * <p>
  * Usage:
@@ -48,12 +45,10 @@ import java.util.logging.Logger;
  *     .registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter())
  *     .create();
  * </pre>
- * </p>
  *
  * <p>
  * This implementation uses {@link DateTimeFormatter#ISO_ZONED_DATE_TIME}
  * to ensure full timezone support worldwide.
- * </p>
  */
 public class ZonedDateTimeAdapter
         implements JsonDeserializer<ZonedDateTime>,
