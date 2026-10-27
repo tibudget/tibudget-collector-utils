@@ -9,9 +9,12 @@ import com.tibudget.api.exceptions.CollectError;
 import com.tibudget.api.exceptions.ConnectionFailure;
 import com.tibudget.api.exceptions.TemporaryUnavailable;
 import com.tibudget.dto.AccountDto;
+import com.tibudget.dto.FileDto;
 import com.tibudget.dto.RecurringPaymentDto;
 import com.tibudget.dto.TransactionDto;
+import com.tibudget.utils.exception.MustStopException;
 import com.tibudget.utils.gson.InstantAdapter;
+import com.tibudget.utils.gson.LocalDateAdapter;
 import com.tibudget.utils.gson.OffsetDateTimeAdapter;
 import com.tibudget.utils.gson.ZonedDateTimeAdapter;
 import org.jsoup.Jsoup;
@@ -28,6 +31,7 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.util.*;
@@ -46,6 +50,8 @@ import java.util.logging.Logger;
 public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 
 	private static final Logger LOG = Logger.getLogger(AbstractCollectorPlugin.class.getName());
+
+	private static final String SETTINGS_PROGRESS_KEY = "tibu.collect.progress";
 
 	public InternetProvider internetProvider;
 	public CounterpartyProvider counterpartyProvider;
@@ -89,6 +95,7 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 				.registerTypeAdapter(ZonedDateTime.class, new ZonedDateTimeAdapter())
 				.registerTypeAdapter(OffsetDateTime.class, new OffsetDateTimeAdapter())
 				.registerTypeAdapter(Instant.class, new InstantAdapter())
+				.registerTypeAdapter(LocalDate.class, new LocalDateAdapter())
 				.create();
 
 		initDefaultHeaders();
@@ -174,7 +181,8 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	 * @return true if the collector must stop gracefully and save its current progress before returning from {@link #collect()}, so that the next collect can resume from where it stopped.
 	 */
 	protected boolean mustStop() {
-		return stop;
+		// Tibu may want us to stop but we want to scrap at least one transaction before stopping
+		return stop && !transactions.isEmpty();
 	}
 
 	public void setConfigurationIdHash(String configurationIdHash) {
@@ -450,6 +458,33 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		return download(url, null);
 	}
 
+	/**
+	 * Return the first element matching the selector within the provided parent
+	 * @param parent The parent
+	 * @param selector The selector
+	 * @return the first element matching the selector within the provided parent
+	 * @throws CollectError No matching element found
+	 */
+	protected Element required(Element parent, String selector) throws CollectError {
+		Element element = parent.selectFirst(selector);
+		if (element == null) {
+			throw new CollectError("starter.history.invalid");
+		}
+		return element;
+	}
+
+	/**
+	 * Downloads the file and create the corresponding FileDto
+	 * @throws CollectError If any error occurs and file cannot be downloaded
+	 */
+	protected FileDto downloadAttachment(String url, FileDto.FileDtoType type, String label, String contentType) throws CollectError {
+		File file = download(url, contentType);
+		if (file == null) {
+			throw new CollectError("Cannot download file '" + label + "'");
+		}
+		return new FileDto(type, label, contentType, file);
+	}
+
 	private <T> T handleJsonResponse(Class<T> clazz, InternetProvider.Response response)
 			throws AccessDeny, TemporaryUnavailable, ConnectionFailure, CollectError {
 
@@ -502,6 +537,9 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 	}
 
 	public void waitForNextRequest() {
+		if (mustStop()) {
+			throw new MustStopException();
+		}
 		if (lastRequestTime > 0) {
 			long elapsed = System.currentTimeMillis() - lastRequestTime;
 			if (elapsed < minIntervalBetweenRequestInMs) {
@@ -629,6 +667,29 @@ public abstract class AbstractCollectorPlugin implements CollectorPlugin {
 		}
 
 		return sb.toString();
+	}
+
+	/**
+	 * Read saved progress from {@link #settings}, or start without a date on the first run.
+	 *
+	 * @return the last collected date and references completed on that date
+	 */
+	protected CollectorProgress loadProgress() {
+		String savedProgress = settings.get(SETTINGS_PROGRESS_KEY);
+		return savedProgress == null ? new CollectorProgress() : gson.fromJson(savedProgress, CollectorProgress.class);
+	}
+
+	/**
+	 * Save the date and reference of a fully collected transaction in {@link #settings}.
+	 * Keep only references from that date. Tibu stores these settings after {@link #collect()} returns.
+	 */
+	protected void saveProgress(CollectorProgress progress, CollectorPendingTransaction transaction) {
+		if (!transaction.date.equals(progress.lastTransactionDate)) {
+			progress.lastTransactionDate = transaction.date;
+			progress.transactionReferences.clear();
+		}
+		progress.transactionReferences.add(transaction.id);
+		settings.put(SETTINGS_PROGRESS_KEY, gson.toJson(progress));
 	}
 
 }

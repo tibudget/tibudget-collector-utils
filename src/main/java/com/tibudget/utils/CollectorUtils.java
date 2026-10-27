@@ -1,5 +1,6 @@
 package com.tibudget.utils;
 
+import com.tibudget.api.exceptions.CollectError;
 import org.jsoup.nodes.Element;
 
 import java.io.File;
@@ -11,12 +12,16 @@ import java.security.MessageDigest;
 import java.text.Normalizer;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class CollectorUtils {
 
     private static final Map<String, String> HTML_ENTITIES = new HashMap<>();
+
+    private static final Pattern INTEGER_PATTERN = Pattern.compile("[+-]?[0-9]+");
 
     private static final Pattern SPACE_PATTERN = Pattern.compile("\\s+");
 
@@ -68,6 +73,175 @@ public final class CollectorUtils {
             return defaultValue;
         }
         return htmlToText(element.text(), true);
+    }
+
+    public static String elementToText(Element element) throws CollectError {
+        if (element == null) {
+            throw new CollectError("elementToText: element is null");
+        }
+        return htmlToText(element.text(), true);
+    }
+
+    public static String elementSelectionToText(Element parent, String cssSelector) throws CollectError {
+        if (parent == null) {
+            throw new CollectError("elementSelectionToText: parent is null");
+        }
+        Element element = parent.selectFirst(cssSelector);
+        if (element == null) {
+            throw new CollectError("elementSelectionToText: element not found: " + parent.cssSelector() + " > " + cssSelector);
+        } else {
+            return htmlToText(element.text(), true);
+        }
+    }
+
+    public static String elementSelectionToText(Element parent, String cssSelector, String defaultValue) {
+        if (parent == null) {
+            return defaultValue;
+        }
+        Element element = parent.selectFirst(cssSelector);
+        if (element == null) {
+            return defaultValue;
+        } else {
+            return htmlToText(element.text(), true);
+        }
+    }
+
+    /**
+     * Reads the first signed integer found in {@link #elementToText(Element)}.
+     * Surrounding text is ignored. Decimal and grouping separators end the match.
+     *
+     * @throws CollectError if the element is null, no integer is found, or the first integer is out of range
+     */
+    public static Integer elementToInteger(Element element) throws CollectError {
+        String text = elementToText(element);
+        Matcher matcher = INTEGER_PATTERN.matcher(text);
+        if (!matcher.find()) {
+            throw new CollectError("elementToInteger: no integer found in element text");
+        }
+        try {
+            return Integer.valueOf(matcher.group());
+        } catch (NumberFormatException e) {
+            throw new CollectError("elementToInteger: element text is not a valid integer", e);
+        }
+    }
+
+    /**
+     * Reads the first signed integer using the same rules as {@link #elementToInteger(Element)}.
+     *
+     * @param defaultValue value returned if the element is null, no integer is found, or the first integer is out of range; may be null
+     * @return the integer value or the default value
+     */
+    public static Integer elementToInteger(Element element, Integer defaultValue) {
+        if (element == null) {
+            return defaultValue;
+        }
+        Matcher matcher = INTEGER_PATTERN.matcher(elementToText(element, null));
+        if (!matcher.find()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.valueOf(matcher.group());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    /**
+     * Reads an integer from the first element matching the CSS selector.
+     * Accepts the same format as {@link #elementToInteger(Element)}.
+     *
+     * @throws CollectError if the parent or element is missing, no integer is found, or the first integer is out of range
+     */
+    public static Integer elementSelectionToInteger(Element parent, String cssSelector) throws CollectError {
+        if (parent == null) {
+            throw new CollectError("elementSelectionToInteger: parent is null");
+        }
+        Element element = parent.selectFirst(cssSelector);
+        if (element == null) {
+            throw new CollectError("elementSelectionToInteger: element not found: " + parent.cssSelector() + " > " + cssSelector);
+        }
+        return elementToInteger(element);
+    }
+
+    /**
+     * Reads an integer from the first element matching the CSS selector.
+     * Accepts the same format as {@link #elementToInteger(Element)}.
+     *
+     * @param defaultValue value returned if the parent or element is missing, or the text is invalid; may be null
+     * @return the integer value or the default value
+     */
+    public static Integer elementSelectionToInteger(Element parent, String cssSelector, Integer defaultValue) {
+        if (parent == null) {
+            return defaultValue;
+        }
+        return elementToInteger(parent.selectFirst(cssSelector), defaultValue);
+    }
+
+    /**
+     * Reads an amount using {@link AmountParser#parse(String, Locale)}.
+     * The currency may be unknown; see {@link AmountDto#getCurrency()}.
+     *
+     * @param locale currency detection hint, or null if unknown
+     * @throws CollectError if the element is null or its text cannot be parsed
+     */
+    public static AmountDto elementToAmount(Element element, Locale locale) throws CollectError {
+        if (element == null) {
+            throw new CollectError("elementToAmount: element is null");
+        }
+        AmountDto amount = AmountParser.parse(element.text(), locale);
+        if (amount == null) {
+            throw new CollectError("elementToAmount: element text is not a valid amount");
+        }
+        return amount;
+    }
+
+    /**
+     * Reads an amount using {@link AmountParser#parse(String, Locale)}.
+     * The currency may be unknown; see {@link AmountDto#getCurrency()}.
+     *
+     * @param locale currency detection hint, or null if unknown
+     * @param defaultValue value returned if the element is missing or its text cannot be parsed; may be null
+     * @return the parsed amount or the default value
+     */
+    public static AmountDto elementToAmount(Element element, Locale locale, AmountDto defaultValue) {
+        if (element == null) {
+            return defaultValue;
+        }
+        AmountDto amount = AmountParser.parse(element.text(), locale);
+        return amount == null ? defaultValue : amount;
+    }
+
+    /**
+     * Reads an amount from the first element matching the CSS selector.
+     * Uses {@link #elementToAmount(Element, Locale)}.
+     *
+     * @param locale currency detection hint, or null if unknown
+     * @throws CollectError if the parent or element is missing, or the text cannot be parsed
+     */
+    public static AmountDto elementSelectionToAmount(Element parent, String cssSelector, Locale locale) throws CollectError {
+        if (parent == null) {
+            throw new CollectError("elementSelectionToAmount: parent is null");
+        }
+        Element element = parent.selectFirst(cssSelector);
+        if (element == null) {
+            throw new CollectError("elementSelectionToAmount: element not found: " + parent.cssSelector() + " > " + cssSelector);
+        }
+        return elementToAmount(element, locale);
+    }
+
+    /**
+     * Reads an amount from the first element matching the CSS selector.
+     * Uses {@link #elementToAmount(Element, Locale, AmountDto)}.
+     *
+     * @param locale currency detection hint, or null if unknown
+     * @param defaultValue value returned if the parent or element is missing, or the text cannot be parsed; may be null
+     * @return the parsed amount or the default value
+     */
+    public static AmountDto elementSelectionToAmount(Element parent, String cssSelector, Locale locale, AmountDto defaultValue) {
+        if (parent == null) {
+            return defaultValue;
+        }
+        return elementToAmount(parent.selectFirst(cssSelector), locale, defaultValue);
     }
 
     /**
