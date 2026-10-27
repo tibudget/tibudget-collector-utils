@@ -139,3 +139,14 @@ Select a version compatible with your Collector API; versions targeting API 0.65
 cannot run API 0.66 collectors without adaptation.
 
 Released under the [MIT License](LICENSE).
+
+
+## JitPack build
+
+JitPack uses Java 21 and the Maven Wrapper to run the tests and install the JAR,
+sources, and Javadoc. The wrapper pins Maven 3.9.16 because the build plugins
+require a newer Maven than the default JitPack image provides.
+
+Run the same build locally with `./mvnw -B -ntp install`.
+After publishing build changes, use a new tag containing them; an existing tag
+still points to its original build configuration.
